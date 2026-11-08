@@ -1,5 +1,5 @@
 import type { AgentInfo, EngineInterface, HttpResponse, On, Timer } from 'claude-code'
-import type { Identity, SavedAgent, SavedModel } from '../types/index.d.ts'
+import type { Identity, SavedAgent, SavedCron, SavedModel, SavedTask } from '../types/index.d.ts'
 import { bearer, errorText, parsed, redactSecrets } from './settings.ts'
 import type { Settings } from './settings.ts'
 
@@ -12,14 +12,7 @@ export type Report =
   | { event: 'session_end' }
   | { event: 'agent_start'; agent_id: string }
   | { event: 'activity'; agent_id: string; kind: 'prompt' | 'presence' }
-  | {
-      event: 'state'
-      agent_id: string
-      state: 'busy' | 'idle' | 'parked' | 'released'
-      park_kind?: 'background' | 'scheduled' | 'both'
-      wake_at?: number
-      deadline?: number
-    }
+  | ({ event: 'state'; agent_id: string; state: SavedAgent['state'] } & Partial<ParkFields>)
 
 export type Body = Report & {
   protocol: 1
@@ -72,21 +65,21 @@ export type Queue = {
   deferred: Map<string, { retryAt: number; attempt: number }>
 }
 
-export type OpenTask = { id: string; kind: 'command' | 'subagent'; deadline?: number }
+export type OpenTask = SavedTask
 
-export type Cron = { id: string; wakeAt: number; recurring: boolean; expression?: string; createdAt: number }
+export type Cron = SavedCron
 
 export type AgentRecord = {
   id: string
   parent?: string
-  state: 'busy' | 'idle' | 'parked' | 'released'
+  state: SavedAgent['state']
   open: Map<string, OpenTask>
   lastPresence: number
 }
 
-export type Park =
-  | { state: 'idle' }
-  | { state: 'parked'; park_kind: 'background' | 'scheduled' | 'both'; wake_at?: number; deadline?: number }
+type ParkFields = { park_kind: 'background' | 'scheduled' | 'both'; wake_at?: number; deadline?: number }
+
+export type Park = { state: 'idle' } | ({ state: 'parked' } & ParkFields)
 
 export const PRESENCE_THROTTLE_MS = 60000
 export const DEFAULT_COMMAND_TIMEOUT_MS = 1800000
@@ -163,15 +156,7 @@ let savedModel: string | undefined
 let refused = false
 // The reports already sent again under a generation the router named, so a second refusal drops them.
 const resent = new WeakSet<Report>()
-const model: Model = {
-  agents: freshAgents(),
-  crons: new Map(),
-  env: {},
-  unlisted: new Map(),
-  turning: new Set(),
-  current: new Set(),
-  released: new Set(),
-}
+const model: Model = freshModel({})
 
 // A line of ANTHROPIC_CUSTOM_HEADERS as the client reads it: the name before the first colon, the value after it.
 function headerLine(line: string): { name: string; value: string } | undefined {
@@ -271,6 +256,10 @@ function isRun(report: Report, agent: string): boolean {
 // agent released, so that answer no longer says the router ended what the mod holds.
 function holdsRun(agent: string): boolean {
   return queue.reports.some((queued) => isRun(queued, agent))
+}
+
+function releaseQueued(agent: string): boolean {
+  return queue.reports.some((queued) => isRelease(queued, agent))
 }
 
 function supersedes(queued: Report, report: Report): boolean {
@@ -487,8 +476,14 @@ function active(): boolean {
   return settings !== undefined && identity !== undefined && !refused
 }
 
+// The pair itself, so a caller sends with the values this checked rather than reading the module's variables again.
+function reporting(): { config: Settings; record: SessionRecord } | undefined {
+  if (!active() || settings === undefined || session === undefined || session.stopped) return undefined
+  return { config: settings, record: session }
+}
+
 function live(): boolean {
-  return active() && session !== undefined && !session.stopped
+  return reporting() !== undefined
 }
 
 function freshRecord(id: string, state: AgentRecord['state'], parent?: string): AgentRecord {
@@ -500,6 +495,18 @@ function freshRecord(id: string, state: AgentRecord['state'], parent?: string): 
 // The router creates main busy with the registration, so the mod starts it the same way.
 function freshAgents(): Map<string, AgentRecord> {
   return new Map([[MAIN, freshRecord(MAIN, 'busy')]])
+}
+
+function freshModel(env: Model['env']): Model {
+  return {
+    agents: freshAgents(),
+    crons: new Map(),
+    env,
+    unlisted: new Map(),
+    turning: new Set(),
+    current: new Set(),
+    released: new Set(),
+  }
 }
 
 function mainAgent(): AgentRecord {
@@ -537,7 +544,7 @@ function announce(agentId: string): void {
   if (agentId === MAIN || session === undefined || session.announced.has(agentId)) return
   const flying = queue.inFlight?.report
   // A start in flight announces the run a queued release ends, so the next run needs a start of its own.
-  const releasing = queue.reports.some((queued) => isRelease(queued, agentId))
+  const releasing = releaseQueued(agentId)
   if (flying !== undefined && sameAgent(flying, 'agent_start', agentId) && !releasing) return
   queue.reports = collapse(queue.reports, { event: 'agent_start', agent_id: agentId })
   session.routerReleased.delete(agentId)
@@ -548,12 +555,7 @@ function report(agentId: string, state: AgentRecord['state'], park?: Park): void
   if (agent !== undefined) agent.state = state
   if (!live()) return
   announce(agentId)
-  const body: Extract<Report, { event: 'state' }> = { event: 'state', agent_id: agentId, state }
-  if (park !== undefined && park.state === 'parked') {
-    body.park_kind = park.park_kind
-    if (park.wake_at !== undefined) body.wake_at = park.wake_at
-    if (park.deadline !== undefined) body.deadline = park.deadline
-  }
+  const body: Extract<Report, { event: 'state' }> = { event: 'state', agent_id: agentId, ...park, state }
   queue.reports = collapse(queue.reports, body)
 }
 
@@ -635,19 +637,23 @@ async function attribute($: EngineInterface, agentId: string | undefined): Promi
 // The task registry the client attaches to a stop event. An open command the registry no longer runs has ended,
 // whatever ended it, and one the registry never held cannot wake its loop, so both leave their owner's open set. A
 // subagent's life is the agent list's to tell, so the registry's subagent rows are left to it.
-function tasksStopped(listed: unknown): void {
-  if (!Array.isArray(listed)) return
-  const running = new Set<string>()
-  for (const entry of listed) {
-    const id = field(entry, 'id')
-    const status = field(entry, 'status')
-    if (typeof id === 'string' && typeof status === 'string' && LIVE_TASK.has(status)) running.add(id)
-  }
-  for (const owner of [...model.agents.values()]) {
-    for (const task of [...owner.open.values()]) {
-      if (task.kind === 'command' && !running.has(task.id)) change(owner, () => owner.open.delete(task.id))
+function tasksStopped($: EngineInterface, e: unknown): void {
+  if (!live()) return
+  const listed = field(e, 'background_tasks')
+  if (Array.isArray(listed)) {
+    const running = new Set<string>()
+    for (const entry of listed) {
+      const id = field(entry, 'id')
+      const status = field(entry, 'status')
+      if (typeof id === 'string' && typeof status === 'string' && LIVE_TASK.has(status)) running.add(id)
+    }
+    for (const owner of [...model.agents.values()]) {
+      for (const task of [...owner.open.values()]) {
+        if (task.kind === 'command' && !running.has(task.id)) change(owner, () => owner.open.delete(task.id))
+      }
     }
   }
+  void pump($)
 }
 
 // The first time the client may fire a wake. A cron's is computed exactly. A wakeup's task id never reaches the mod,
@@ -810,12 +816,8 @@ function restate(agent: AgentRecord): void {
 // The registration's answer names every agent the router holds. Each side learns what the other lacks: an agent
 // only the router holds is rebuilt from the client's list or released, a state the router holds wrongly is sent
 // again, and an agent only the mod holds is announced with its state.
-function reconcileAck(entries: unknown[], listed: AgentInfo[] | undefined): void {
-  const held = new Map<string, unknown>()
-  for (const entry of entries) {
-    const id = field(entry, 'agent_id')
-    if (typeof id === 'string') held.set(id, field(entry, 'state'))
-  }
+function reconcileAck(entries: AnsweredAgent[], listed: AgentInfo[] | undefined): void {
+  const held = new Map(entries.map((entry) => [entry.agent_id, entry.state]))
   const client = listed === undefined ? undefined : new Map(listed.map((agent) => [agent.id, agent]))
   const live: AgentInfo[] = []
   for (const [id, state] of held) {
@@ -829,7 +831,7 @@ function reconcileAck(entries: unknown[], listed: AgentInfo[] | undefined): void
     // again until a spawn or a turn starts a new run, and a router restored from a save older than the release
     // learns of it here, when no release of it is still queued.
     if (model.released.has(id)) {
-      if (!queue.reports.some((queued) => isRelease(queued, id))) {
+      if (!releaseQueued(id)) {
         report(id, 'released')
         session?.announced.delete(id)
       }
@@ -887,12 +889,12 @@ function reregister(): void {
   }
 }
 
-function request(config: Settings, body: Body): { method: string; headers: Record<string, string>; body: string } {
-  return {
+function post($: EngineInterface, config: Settings, body: Body): Promise<HttpResponse> {
+  return $.http.fetch(config.url + EVENTS_PATH, {
     method: 'POST',
     headers: { ...bearer(config.key), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }
+  })
 }
 
 // The tracked work as the host holds it: a reload of the module in the same session reads it back before the
@@ -902,11 +904,7 @@ function snapshotModel(record: SessionRecord): SavedModel {
     id: agent.id,
     ...(agent.parent === undefined ? {} : { parent: agent.parent }),
     state: agent.state,
-    open: [...agent.open.values()].map((task) => ({
-      id: task.id,
-      kind: task.kind,
-      ...(task.deadline === undefined ? {} : { deadline: task.deadline }),
-    })),
+    open: [...agent.open.values()].map((task) => ({ ...task })),
     lastPresence: agent.lastPresence,
   }))
   return {
@@ -969,16 +967,9 @@ async function ensureSession($: EngineInterface): Promise<void> {
   queue.reports = collapse([], startReport())
   queue.deferred = new Map()
   savedModel = undefined
-  model.unlisted = new Map()
-  model.turning = new Set()
-  model.current = new Set()
-  model.released = new Set()
-  if (held !== undefined) {
-    restoreModel(held, session)
-    return
-  }
-  model.agents = freshAgents()
-  model.crons = new Map()
+  // startKeepalive reads the Bash variables before it calls this, so they carry over.
+  Object.assign(model, freshModel(model.env))
+  if (held !== undefined) restoreModel(held, session)
 }
 
 // The first queued report that may go out now: one of an agent whose start the router refused for its limit waits
@@ -992,30 +983,29 @@ function nextReport(now: number): number {
   })
 }
 
-function ready(): boolean {
-  return active() && session !== undefined && !session.stopped && queue.inFlight === undefined &&
-    queue.reports.length > 0
+function ready(): { config: Settings; record: SessionRecord } | undefined {
+  return queue.inFlight === undefined && queue.reports.length > 0 ? reporting() : undefined
 }
 
 async function pump($: EngineInterface): Promise<void> {
   try {
     await persistModel($)
-    if (!ready()) return
+    if (ready() === undefined) return
     const sentAt = await $.clock.now()
     if (queue.retryAt !== undefined && sentAt < queue.retryAt) return
-    if (!ready() || session === undefined || settings === undefined) return
+    const held = ready()
+    if (held === undefined) return
     const at = nextReport(sentAt)
     if (at < 0) return
-    const record = session
     // A session.start can replace or clear the settings while the request is out, so the catch reads the key this
     // request carried from here and cannot throw on a cleared one.
-    const config = settings
+    const { config, record } = held
     const [report] = queue.reports.splice(at, 1) as [Report]
     queue.inFlight = { report }
-    const init = request(settings, buildBody(record, report, sentAt))
+    const body = buildBody(record, report, sentAt)
     let response: HttpResponse | undefined
     try {
-      response = await $.http.fetch(settings.url + EVENTS_PATH, init)
+      response = await post($, config, body)
     } catch (error) {
       // The client refuses a plugin's fetch inside the process when its policy check failed, and a refused host
       // throws the same way, so the one sign of either is this line: the backoff below retries all the same. The
@@ -1053,6 +1043,41 @@ export function emptyQueue(): void {
   queue.reports = []
 }
 
+type AnsweredAgent = { agent_id: string; state: unknown; request_generation?: number }
+
+type Answer = {
+  code?: string
+  lease_expires_ms?: number
+  request_generation?: number
+  agent_id?: string
+  instance_id?: string
+  agents?: AnsweredAgent[]
+}
+
+// An agents entry is kept with a string agent_id alone: the generations skip one without a number, but the
+// registration's reconcile still reads its state.
+function answerOf(text: string): Answer {
+  const value = parsed(text)
+  const answer: Answer = {}
+  if (typeof value.code === 'string') answer.code = value.code
+  if (typeof value.lease_expires_ms === 'number') answer.lease_expires_ms = value.lease_expires_ms
+  if (typeof value.request_generation === 'number') answer.request_generation = value.request_generation
+  if (typeof value.agent_id === 'string') answer.agent_id = value.agent_id
+  if (typeof value.instance_id === 'string') answer.instance_id = value.instance_id
+  if (Array.isArray(value.agents)) {
+    answer.agents = []
+    for (const entry of value.agents) {
+      const id = field(entry, 'agent_id')
+      if (typeof id !== 'string') continue
+      const agent: AnsweredAgent = { agent_id: id, state: field(entry, 'state') }
+      const generation = field(entry, 'request_generation')
+      if (typeof generation === 'number') agent.request_generation = generation
+      answer.agents.push(agent)
+    }
+  }
+  return answer
+}
+
 function settle($: EngineInterface, record: SessionRecord, report: Report, response: HttpResponse | undefined,
   now: number, listed: AgentInfo[] | undefined): void {
   const repeated = startRefusal
@@ -1060,7 +1085,7 @@ function settle($: EngineInterface, record: SessionRecord, report: Report, respo
   // The router's agent limit refuses one agent's start, not the session: that agent waits under its own retry time
   // while the lease is renewed and the other agents report.
   if (response !== undefined && response.status === 429 && report.event === 'agent_start' &&
-    parsed(response.text).code === 'agent_limit') {
+    answerOf(response.text).code === 'agent_limit') {
     queue.reports = restore(queue.reports, report)
     deferAgent($, report.agent_id, now)
     return
@@ -1071,7 +1096,7 @@ function settle($: EngineInterface, record: SessionRecord, report: Report, respo
     return
   }
   if (response.ok) {
-    acknowledged($, record, report, parsed(response.text), now, listed)
+    acknowledged($, record, report, answerOf(response.text), now, listed)
     return
   }
   if (response.status === 401 || response.status === 403) {
@@ -1083,13 +1108,13 @@ function settle($: EngineInterface, record: SessionRecord, report: Report, respo
     return
   }
   if (response.status === 409) {
-    refusedReport($, record, report, parsed(response.text), now, repeated)
+    refusedReport($, record, report, answerOf(response.text), now, repeated)
     return
   }
   // Any other answer names a report the router never takes, so the mod drops it rather than retrying. The router
   // keeps no trace of it, which leaves this line as the one sign of a body the mod built wrong.
-  const code = parsed(response.text).code
-  const named = typeof code === 'string' && CODE.test(code) ? `with code ${code}` : 'with no code'
+  const code = answerOf(response.text).code
+  const named = code !== undefined && CODE.test(code) ? `with code ${code}` : 'with no code'
   $.ui.log(`the router answered status ${response.status} ${named} to the ${report.event} report, so the mod drops it`,
     { to: 'debug' })
 }
@@ -1107,23 +1132,18 @@ function deferAgent($: EngineInterface, agent: string, now: number): void {
   $.clock.after(retryAt - now, () => void pump($))
 }
 
-function acknowledged($: EngineInterface, record: SessionRecord, report: Report, ack: Record<string, unknown>,
+function acknowledged($: EngineInterface, record: SessionRecord, report: Report, ack: Answer,
   now: number, listed: AgentInfo[] | undefined): void {
   // Only these two reports renew the router's lease, so only their answers move the heartbeat.
-  if ((report.event === 'session_start' || report.event === 'heartbeat') && typeof ack.lease_expires_ms === 'number') {
+  if ((report.event === 'session_start' || report.event === 'heartbeat') && ack.lease_expires_ms !== undefined) {
     const at = now + heartbeatInterval(ack.lease_expires_ms, now)
     record.heartbeatAt = at
     timer?.cancel()
     timer = $.clock.after(at - now, () => tick($))
   }
-  if (typeof ack.request_generation === 'number') {
-    record.generations.set(typeof ack.agent_id === 'string' ? ack.agent_id : MAIN, ack.request_generation)
-  }
-  const agents: unknown[] = Array.isArray(ack.agents) ? ack.agents : []
-  for (const agent of agents) {
-    if (typeof agent !== 'object' || agent === null) continue
-    const { agent_id: id, request_generation: generation, state } = agent as Record<string, unknown>
-    if (typeof id !== 'string' || typeof generation !== 'number') continue
+  if (ack.request_generation !== undefined) record.generations.set(ack.agent_id ?? MAIN, ack.request_generation)
+  for (const { agent_id: id, request_generation: generation, state } of ack.agents ?? []) {
+    if (generation === undefined) continue
     record.generations.set(id, generation)
     if (state === 'released') {
       record.announced.delete(id)
@@ -1135,7 +1155,7 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
       record.routerReleased.delete(id)
       // The answer names the run a queued release ends, so the next run needs a start of its own, as for a start's
       // answer below.
-      if (!queue.reports.some((queued) => isRelease(queued, id))) record.announced.add(id)
+      if (!releaseQueued(id)) record.announced.add(id)
     }
   }
   // A start answered after its run ended leaves the agent unannounced, so the next run starts it again once the
@@ -1145,7 +1165,7 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
     // An accepted start means the router holds the run live again, whatever answer named it released after the start
     // was queued.
     record.routerReleased.delete(report.agent_id)
-    if (!queue.reports.some((queued) => isRelease(queued, report.agent_id))) record.announced.add(report.agent_id)
+    if (!releaseQueued(report.agent_id)) record.announced.add(report.agent_id)
   }
   if (report.event === 'session_start') {
     if (record.conflicted === true && report.previous_instance_id !== undefined) {
@@ -1156,13 +1176,13 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
   queue.attempt = 0
   queue.retryAt = undefined
   // An answer without the member says nothing about the router's agents, so nothing is reconciled against it.
-  if (report.event === 'session_start' && Array.isArray(ack.agents)) reconcileAck(agents, listed)
+  if (report.event === 'session_start' && ack.agents !== undefined) reconcileAck(ack.agents, listed)
 }
 
-function refusedReport($: EngineInterface, record: SessionRecord, report: Report,
-  refusal: Record<string, unknown>, now: number, repeated: unknown): void {
+function refusedReport($: EngineInterface, record: SessionRecord, report: Report, refusal: Answer, now: number,
+  repeated: unknown): void {
   const agent = agentOf(report)
-  const generation = typeof refusal.request_generation === 'number' ? refusal.request_generation : undefined
+  const generation = refusal.request_generation
   switch (refusal.code) {
     case 'unknown_instance':
     case 'instance_ended':
@@ -1179,7 +1199,7 @@ function refusedReport($: EngineInterface, record: SessionRecord, report: Report
     case 'instance_conflict':
       // The router names a holder that ended or went silent, the one a takeover start replaces, so a holder named
       // after a takeover start already went out is the newer one to take over from.
-      if (typeof refusal.instance_id === 'string') {
+      if (refusal.instance_id !== undefined) {
         queue.reports = collapse(queue.reports, startReport(refusal.instance_id))
         return
       }
@@ -1469,31 +1489,25 @@ export function installKeepalive(on: On): void {
   // The client's task registry rides every stop event, of main and of each subagent, so a command's end is read
   // there and never from the text of the notification that reported it.
   on('classic.Stop', async ($, e, next) => {
-    if (live()) {
-      tasksStopped(field(e, 'background_tasks'))
-      void pump($)
-    }
+    tasksStopped($, e)
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('classic.SubagentStop', async ($, e, next) => {
-    if (live()) {
-      tasksStopped(field(e, 'background_tasks'))
-      void pump($)
-    }
+    tasksStopped($, e)
     return next(e)
   }).catch(($, e, next) => next(e))
 
   // The end goes out past a request in flight: every session.end hook shares one short budget, and the lease
   // covers whatever this one request does not reach.
   on('session.end', async ($, e, next) => {
-    if (active() && settings !== undefined && session !== undefined && !session.stopped) {
-      const config = settings
-      const record = session
+    const held = reporting()
+    if (held !== undefined) {
+      const { config, record } = held
       record.stopped = true
       queue.reports = []
       const body = buildBody(record, { event: 'session_end' }, await $.clock.now())
-      void $.http.fetch(config.url + EVENTS_PATH, request(config, body)).catch(() => undefined)
+      void post($, config, body).catch(() => undefined)
     }
     return next(e)
   }).catch(($, e, next) => next(e))
