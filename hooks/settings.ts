@@ -12,7 +12,7 @@ export type Options = { managementUrl: string; token: string; keepalive: boolean
 
 export type Settings = { url: string; key: string }
 
-export type SettingSources = {
+type SettingSources = {
   managementUrl: string
   token: string
   baseUrl: string | undefined

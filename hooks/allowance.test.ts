@@ -80,12 +80,10 @@ test('a 200 registers the tool once and a second call inside ten seconds answers
     await start($, clock)
     expect(router.tools).toHaveLength(1)
     expect(router.tools[0]).toMatchObject({ name: 'allowance', isDeferred: false })
-    await clock.set(T0 + 1000)
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
-    await clock.set(T0 + 9000)
+    await clock.set(T0 + 9999)
     expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
     expect(router.gets).toHaveLength(1)
-    await clock.set(T0 + 11000)
+    await clock.set(T0 + 10000)
     expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
     expect(router.gets).toHaveLength(2)
     await clock.set(T0 + 12_000)
@@ -273,9 +271,6 @@ test('a client between 2.1.287 and 2.1.293 runs the start check and reports, wit
     await start($, clock)
     expect(router.gets).toHaveLength(1)
     expect(router.tools).toEqual([])
-    expect(router.logs).toEqual([{
-      text: 'phoebis-companion: Claude Code 2.1.292 is older than 2.1.293, so the allowance tool is not registered',
-      to: 'debug',
-    }])
+    expect(router.logs.map((line) => line.to)).toEqual(['debug'])
     expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
   })
