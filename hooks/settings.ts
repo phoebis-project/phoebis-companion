@@ -85,6 +85,8 @@ export function resolveSettings(sources: SettingSources): Resolution {
   // A URL from ANTHROPIC_BASE_URL or a hand-edited settings file never passed the config.set hook, and the failure
   // texts quote the URL, whose query redactSecrets leaves in place.
   const problem = urlProblem(url)
+  // NOT_HTTP names what the URL must be rather than what is wrong with it, so the start's line leads it in.
+  if (problem === NOT_HTTP) return { missing: 'invalid_url', problem: `it needs to be ${NOT_HTTP}` }
   if (problem !== undefined) return { missing: 'invalid_url', problem }
   // The variables rank as the client ranks them, so the key the mod reports under is the key the client sends.
   const key =

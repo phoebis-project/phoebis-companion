@@ -149,7 +149,7 @@ async function registerTool($: EngineInterface, client: string): Promise<void> {
   }
 }
 
-/** Makes every start check and call whose GET is still out stale: its answer is neither cached nor acted on. */
+/** Makes every start check whose GET is still out stale, and keeps a pending call's answer out of the cache. */
 export function retireStarts(): void {
   generation += 1
 }
