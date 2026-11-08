@@ -24,8 +24,12 @@ type SettingSources = {
 export type Resolution =
   | { settings: Settings }
   | { missing: 'no_url' | 'no_token' | 'token_without_url' }
+  | { missing: 'invalid_url'; problem: string }
 
-/** `undefined` when the URL is acceptable, else the reason the `config.set` hook denies it. */
+/**
+ * `undefined` when the URL is acceptable, else the reason the `config.set` hook denies it. A reason quotes no part of
+ * the value, so the start's transcript line can carry it without leaking a credential or a query.
+ */
 export function urlProblem(value: unknown): string | undefined {
   if (typeof value !== 'string') return NOT_HTTP
   // A blank URL leaves the router's address to ANTHROPIC_BASE_URL, as resolveSettings reads it.
@@ -78,6 +82,10 @@ export function resolveSettings(sources: SettingSources): Resolution {
   if (tokenWithoutUrl(sources)) return { missing: 'token_without_url' }
   const url = given(sources.managementUrl) ?? given(sources.baseUrl)
   if (url === undefined) return { missing: 'no_url' }
+  // A URL from ANTHROPIC_BASE_URL or a hand-edited settings file never passed the config.set hook, and the failure
+  // texts quote the URL, whose query redactSecrets leaves in place.
+  const problem = urlProblem(url)
+  if (problem !== undefined) return { missing: 'invalid_url', problem }
   // The variables rank as the client ranks them, so the key the mod reports under is the key the client sends.
   const key =
     given(sources.token) ?? given(sources.authToken) ?? given(sources.apiKey) ?? given(sources.oauthToken)

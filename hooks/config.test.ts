@@ -129,6 +129,23 @@ describe('a missing setting raises a toast beside its transcript line only while
   }
 })
 
+test('a query in ANTHROPIC_BASE_URL stops the start before any request, and the value reaches no line or toast',
+  async ($, on) => {
+    mock.env(on, { ANTHROPIC_AUTH_TOKEN: KEY, ANTHROPIC_BASE_URL: 'http://127.0.0.1:1?access_token=url-secret' })
+    const clock = mock.clock(on)
+    const router = fakeRouter(on, clock)
+    // A failed GET would quote the URL in its transcript line and toast.
+    router.answerGet(() => ({ fail: 'connection refused' }))
+    await start($, clock)
+    expect(router.gets).toEqual([])
+    expect(router.requests).toEqual([])
+    expect(router.logs.map((line) => line.to)).toEqual(['transcript'])
+    expect(router.toasts).toHaveLength(1)
+    const shown = JSON.stringify({ logs: router.logs, toasts: router.toasts })
+    expect(shown).not.toContain('url-secret')
+    expect(shown).not.toContain('127.0.0.1')
+  })
+
 test('a start that finds no router key leaves nothing reported under the settings an earlier start resolved',
   CONFIGURED, async ($, on) => {
     const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])

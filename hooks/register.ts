@@ -5,6 +5,7 @@ import { optionsOf, PREFIX, redactSecrets, resolveSettings, urlProblem, versionA
 import type { Resolution, Settings } from './settings.ts'
 
 const MISSING: Record<Extract<Resolution, { missing: unknown }>['missing'], string> = {
+  invalid_url: `${PREFIX}the management URL from the option or ANTHROPIC_BASE_URL is not usable`,
   no_token: `${PREFIX}no router key from the option or the environment`,
   no_url: `${PREFIX}no management URL from the option or ANTHROPIC_BASE_URL`,
   token_without_url: `${PREFIX}the token setting needs the Management URL, so this session reports nothing`,
@@ -59,12 +60,15 @@ export const register: Register = (on, options) => {
       oauthToken,
     })
     if ('missing' in resolution) {
+      const line = 'problem' in resolution
+        ? `${MISSING[resolution.missing]} (${resolution.problem})`
+        : MISSING[resolution.missing]
       // An earlier start's settings would otherwise keep the lifecycle reporting, and the next session registering,
       // under a URL and key this start no longer resolves.
       clearSettings()
       current = undefined
-      $.ui.log(MISSING[resolution.missing])
-      if (config.notifications) $.ui.toast(MISSING[resolution.missing])
+      $.ui.log(line)
+      if (config.notifications) $.ui.toast(line)
       return next(e)
     }
     current = resolution.settings
