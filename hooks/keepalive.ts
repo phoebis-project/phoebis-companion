@@ -611,9 +611,9 @@ async function ensureSession($: EngineInterface, revive: boolean): Promise<void>
   // the session_end. Only a prompt or a start shows the resume, so a tick leaves the record ended.
   const kept = (): boolean => session?.id === id && !(revive && session.stopped)
   if (kept() || identity === undefined) return
-  // The same id in the same process is a reload of the module, whose tracked work the host still holds. A new id
-  // is a new conversation, so nothing the old one had open or scheduled carries over. Read before the session
-  // moves, so a pump during the read never writes the old session's work under the new id.
+  // The same id in the same process is a reload of the module or a resume after its end, and the host still holds
+  // its tracked work. A new id is a new conversation, so nothing the old one had open or scheduled carries over. Read
+  // before the session moves, so a pump during the read never writes the old session's work under the new id.
   const held = heldModelFor((await $.state.get(MODEL_REF)).value, id)
   if (kept()) return
   session = {
@@ -1028,10 +1028,17 @@ async function fence($: EngineInterface): Promise<Identity> {
  */
 export async function startKeepalive($: EngineInterface, resolved: Settings, isCurrent: () => boolean):
   Promise<void> {
-  // The refusal holds until the fence is done: cleared before its await, it would let a report go out under the
-  // refused key, whose 401 sets the refusal again.
+  // The earlier settings and the refusal hold through every await here. Replaced or lifted sooner, they would let a
+  // pump send under the refused key, whose 401 sets the refusal again, or register the record of an older id that
+  // ensureSession is about to replace.
   identity = await fence($)
-  // A later session start can land while the fence awaits, and the settings it set or cleared must stand.
+  const [defaultMs, maxMs] = await Promise.all([
+    $.env.get('BASH_DEFAULT_TIMEOUT_MS'),
+    $.env.get('BASH_MAX_TIMEOUT_MS'),
+  ])
+  model.env = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
+  await ensureSession($, true)
+  // A later session start can land during these awaits, and the settings it set or cleared must stand.
   if (!isCurrent()) return
   // One step with no await, so no report goes out under these settings ahead of the registration. Its acknowledgment
   // is what schedules the heartbeat, so the session registers again whatever ended the previous settings, and a
@@ -1039,12 +1046,6 @@ export async function startKeepalive($: EngineInterface, resolved: Settings, isC
   settings = resolved
   refused = false
   reregister()
-  const [defaultMs, maxMs] = await Promise.all([
-    $.env.get('BASH_DEFAULT_TIMEOUT_MS'),
-    $.env.get('BASH_MAX_TIMEOUT_MS'),
-  ])
-  model.env = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
-  await ensureSession($, true)
   void pump($)
 }
 

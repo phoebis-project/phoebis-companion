@@ -583,6 +583,17 @@ test('a session resumed under its original id after its end registers again', CO
   ])
 })
 
+test('a tick already reading the id when the session ends does not revive it', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  // The heartbeat's tick reads the id two seconds late, and the session ends meanwhile.
+  router.delayId(2000)
+  await clock.advance(25000)
+  await end($, clock, 'other', 'session-a')
+  await clock.advance(2000)
+  expect(events(router)).toEqual(['session_start', 'session_end'])
+})
+
 test('a registration refused twice in a row with the same code waits the backoff before it is sent again',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
@@ -766,6 +777,26 @@ test('a start whose check registers the tool after a refused key resumes under t
     expect(events(router).slice(1)).toEqual(['session_start', 'heartbeat'])
     expect(router.headers.slice(1).map((headers) => headers.Authorization)).toEqual(['Bearer K2', 'Bearer K2'])
   })
+
+test('a start under a new id never registers the old id a pump finds first', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  router.answer(() => ({ status: 401 }))
+  await start($, clock)
+  // The refusal leaves the end nothing to report, so the record under session-a is never marked ended.
+  await end($, clock, 'other', 'session-a')
+  router.setId('session-b')
+  // The new id's read of the held work answers a second late, and a tool call pumps meanwhile.
+  router.delayModel(1000)
+  const starting = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await $.tool.call({ tool: 'Read', tool_use_id: 'toolu_1' } as Parameters<Engine['tool']['call']>[0])
+  await clock.advance(1000)
+  await starting
+  await clock.settle()
+  expect(router.requests.slice(1).map((body) => [body.event, body.session_id])).toEqual([
+    ['session_start', 'session-b'],
+  ])
+})
 
 describe('the request is a POST of protocol 1 to the events path with a JSON content type', () => {
   const urls = [
