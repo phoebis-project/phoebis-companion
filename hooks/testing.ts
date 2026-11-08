@@ -1,0 +1,486 @@
+import type { AgentInfo, AgentStatus, On, SessionVersion } from 'claude-code'
+import type { Engine, MockClock } from 'claude-code/testing'
+import type { Identity } from '../types/index.d.ts'
+import type { Ack, Body, Refusal } from './keepalive.ts'
+
+// The recorded host beneath every mod test: the router behind `$.http.fetch`, the session's id and version, the
+// environment writes, the state the host holds for the plugin, the plugin's own store, the command that reads the
+// client process, the log, the agent list, and the engine's own answers to the events a replay raises, so no bottom
+// hook throws for an event the mod passes on.
+
+/** What the router answers one request with: a status and a JSON body, or a transport failure. */
+export type Reply = { status: number; body?: unknown } | { fail: string }
+
+/** A scripted answer, handed the request's body and the acknowledgment the router would send by default. */
+export type Answer = (body: Body, ack: Ack) => Reply | Promise<Reply>
+
+export type FakeOptions = {
+  /** What `$.session.id()` answers until `setId` changes it. */
+  id?: string
+  /** What `$.session.version()` answers until a replayed `session.start` line names its own. */
+  version?: string
+  /** The identity the host already holds for the plugin, as it does across a hot reload of the module. */
+  state?: Identity
+  /** The other values the host already holds for the plugin, by key, as it does across a hot reload of the module. */
+  values?: Record<string, unknown>
+  /**
+   * What `$.process.run` prints for the client process's identity. Absent, the host runs no command, as a surface
+   * without process access answers.
+   */
+  process?: string
+  /** What the plugin's own store holds at the start, by key, as the file it keeps across processes does. */
+  store?: Record<string, unknown>
+}
+
+export type LogLine = { text: string; to: string }
+
+export type EnvWrite = { name: string; value: string | undefined }
+
+export type FakeRouter = {
+  /** Every body the mod posted, in order. */
+  requests: Body[]
+  /** Every answer other than a 2xx, with its status. */
+  refusals: (Refusal & { status: number })[]
+  /** Every `$.ui.log` line with its sink. */
+  logs: LogLine[]
+  /** The headers of every request, in order. */
+  headers: Record<string, string>[]
+  /** The method and URL of every request, in order. */
+  targets: { method: string; url: string }[]
+  /** The clock's time as each request arrived, in order. */
+  times: number[]
+  /** The op stubs the mod reached, by event name, in order. */
+  reached: string[]
+  /** Every `$.env.set` with its name and value, in order. */
+  envWrites: EnvWrite[]
+  /** The identity the mod wrote through `$.state.set`, absent until it writes one. */
+  state?: Identity
+  /** The other values the mod wrote through `$.state.set`, by key, each the last write. */
+  values: Map<string, unknown>
+  /** The plugin's store as the mod left it, by key: the start's contents and every `$.store.set` over them. */
+  store: Map<string, unknown>
+  /** The argument vector of every `$.process.run`, in order. */
+  commands: (readonly string[])[]
+  setId: (id: string) => void
+  setAgents: (list: readonly { id: string; status: string; type?: string; parentId?: string }[]) => void
+  setVersion: (version: SessionVersion) => void
+  /** Replaces the default answer for the next request, and several calls answer the next requests in turn. */
+  answer: (fn: Answer) => void
+  /**
+   * Scripts the result of the next hand-built `tool.call`, and several calls answer the next calls in turn. A
+   * function that answers a promise holds the call until it settles, as a tool that runs for a while does.
+   */
+  answerTool: (fn: (e: { tool: string }) => unknown) => void
+  /** Scripts the next `agent.spawn`'s answer the same way, with the id the client gives the agent. */
+  answerSpawn: (fn: () => { agentId: string } | Promise<{ agentId: string }>) => void
+  /** Holds the next `$.agent.list()` for this long on the clock before it answers. */
+  delayList: (ms: number) => void
+  /** Holds the next `$.state.get` of the plugin's tracked work for this long on the clock before it answers. */
+  delayModel: (ms: number) => void
+}
+
+type Replayed = { tool?: unknown; spawn?: { model?: string; agentId?: string } }
+
+const replayed = new WeakMap<FakeRouter, Replayed>()
+
+export const LEASE_MS = 90000
+
+const EVENT_FIELDS: Record<string, { required: string[]; optional: string[] }> = {
+  activity: { required: ['agent_id', 'kind'], optional: ['request_generation'] },
+  agent_start: { required: ['agent_id'], optional: ['request_generation'] },
+  heartbeat: { required: [], optional: [] },
+  session_end: { required: [], optional: [] },
+  session_start: { required: [], optional: ['owner_id', 'previous_instance_id'] },
+  state: { required: ['agent_id', 'state'], optional: ['deadline', 'park_kind', 'request_generation', 'wake_at'] },
+}
+
+const COMMON_FIELDS = ['event', 'instance_id', 'protocol', 'sequence', 'session_id']
+
+// The router's decoder, so a body the router would refuse is refused here with the same code.
+function invalid(body: Record<string, unknown>): string | undefined {
+  if (body.protocol !== 1) return body.protocol === undefined ? 'invalid_event' : 'unsupported_protocol'
+  const fields = EVENT_FIELDS[String(body.event)]
+  if (fields === undefined) return typeof body.event === 'string' ? 'unknown_event' : 'invalid_event'
+  const allowed = new Set([...COMMON_FIELDS, ...fields.required, ...fields.optional])
+  if (Object.keys(body).some((key) => !allowed.has(key))) return 'invalid_event'
+  if ([...COMMON_FIELDS, ...fields.required].some((key) => body[key] === undefined)) return 'invalid_event'
+  const ids = [body.session_id, body.instance_id, body.agent_id ?? 'main']
+  if (ids.some((id) => typeof id !== 'string' || id === '')) return 'invalid_identity'
+  if (!Number.isInteger(body.sequence) || (body.sequence as number) < 1) return 'invalid_identity'
+  // The router reads the two times as whole milliseconds, so a fraction fails its decoder.
+  if ([body.wake_at, body.deadline].some((at) => at !== undefined && !Number.isInteger(at))) return 'invalid_event'
+  if (body.kind !== undefined && body.kind !== 'prompt' && body.kind !== 'presence') return 'invalid_state'
+  if (body.event === 'state') {
+    if (!['busy', 'idle', 'parked', 'released', 'unknown'].includes(String(body.state))) return 'invalid_state'
+    const parked = body.state === 'parked'
+    if (!parked && (body.park_kind !== undefined || body.wake_at !== undefined || body.deadline !== undefined)) {
+      return 'invalid_event'
+    }
+    if (parked && !['background', 'scheduled', 'both'].includes(String(body.park_kind))) return 'invalid_state'
+    if (parked && body.park_kind !== 'background' && body.wake_at === undefined) return 'invalid_event'
+  }
+  return undefined
+}
+
+export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}): FakeRouter {
+  // The engine answers a stop event itself; under test the fake host stands in, so the mod's hook can pass it on.
+  on('classic.Stop', async () => ({}))
+  on('classic.SubagentStop', async () => ({}))
+  let id = options.id ?? 'session-a'
+  let version: SessionVersion = { version: options.version ?? '2.1.292', base: options.version ?? '2.1.292' }
+  let agents: AgentInfo[] = []
+  const answers: Answer[] = []
+  const tools: ((e: { tool: string }) => unknown)[] = []
+  const spawns: (() => { agentId: string } | Promise<{ agentId: string }>)[] = []
+  let listDelayMs = 0
+  let modelDelayMs = 0
+  // The agents the router holds per session, each with its generation.
+  const held = new Map<string, Map<string, number>>()
+  // The last sequence the router took per session and instance, so a report at or below it is refused as the router
+  // refuses it.
+  const sequences = new Map<string, number>()
+  let identity = options.state
+  let stateVersion = identity === undefined ? 0 : 1
+  const values = new Map(Object.entries(options.values ?? {}))
+  let spawned = 0
+
+  const router: FakeRouter = {
+    requests: [],
+    refusals: [],
+    logs: [],
+    headers: [],
+    targets: [],
+    times: [],
+    reached: [],
+    envWrites: [],
+    values: new Map(),
+    store: new Map(Object.entries(options.store ?? {})),
+    commands: [],
+    setId: (next) => {
+      id = next
+    },
+    setAgents: (list) => {
+      agents = list.map((agent) => ({
+        id: agent.id,
+        status: agent.status as AgentStatus,
+        type: agent.type ?? 'general-purpose',
+        description: '',
+        ...(agent.parentId === undefined ? {} : { parentId: agent.parentId }),
+      }))
+    },
+    setVersion: (next) => {
+      version = next
+    },
+    answer: (fn) => {
+      answers.push(fn)
+    },
+    answerTool: (fn) => {
+      tools.push(fn)
+    },
+    answerSpawn: (fn) => {
+      spawns.push(fn)
+    },
+    delayList: (ms) => {
+      listDelayMs = ms
+    },
+    delayModel: (ms) => {
+      modelDelayMs = ms
+    },
+  }
+  const slots: Replayed = {}
+  replayed.set(router, slots)
+
+  function agentsOf(session: string): Map<string, number> {
+    let map = held.get(session)
+    if (map === undefined) {
+      map = new Map([['main', 1]])
+      held.set(session, map)
+    }
+    return map
+  }
+
+  function acknowledgment(body: Body): Ack {
+    const known = agentsOf(body.session_id)
+    const agent = 'agent_id' in body ? body.agent_id : 'main'
+    // A report the router takes carries the agent's current generation, so the default answer agrees with it.
+    const ack: Ack = {
+      session_id: body.session_id,
+      instance_id: body.instance_id,
+      sequence: body.sequence,
+      lease_expires_ms: clock.now() + LEASE_MS,
+      agent_id: agent,
+      request_generation: body.request_generation ?? known.get(agent) ?? 1,
+    }
+    if (body.event === 'session_start') {
+      ack.agents = [...known].map(([agentId, generation]) => ({
+        agent_id: agentId,
+        state: 'busy',
+        request_generation: generation,
+      }))
+    }
+    return ack
+  }
+
+  on('http.fetch', async (_$, e) => {
+    router.reached.push('http.fetch')
+    const init = e.init ?? {}
+    router.targets.push({ method: init.method ?? 'GET', url: e.url })
+    router.times.push(clock.now())
+    router.headers.push({ ...(init.headers ?? {}) })
+    let decoded: Record<string, unknown>
+    try {
+      decoded = JSON.parse(init.body ?? '') as Record<string, unknown>
+    } catch {
+      decoded = { unparsed: init.body ?? '' }
+    }
+    const body = decoded as Body
+    router.requests.push(body)
+    const ack = acknowledgment(body)
+    const stream = `${body.session_id} ${body.instance_id}`
+    const scripted = answers.shift()
+    let reply: Reply
+    if (scripted !== undefined) {
+      reply = await scripted(body, ack)
+    } else {
+      const code = invalid(decoded)
+      if (code !== undefined) {
+        reply = { status: 400, body: { code } }
+      } else if (body.sequence <= (sequences.get(stream) ?? 0)) {
+        reply = { status: 409, body: { code: 'stale_sequence' } }
+      } else {
+        agentsOf(body.session_id).set(ack.agent_id ?? 'main', ack.request_generation ?? 1)
+        reply = { status: 200, body: ack }
+      }
+    }
+    if ('fail' in reply) return { deny: reply.fail }
+    if (reply.status >= 200 && reply.status <= 299 && typeof body.sequence === 'number') {
+      sequences.set(stream, Math.max(sequences.get(stream) ?? 0, body.sequence))
+    }
+    if (reply.status < 200 || reply.status > 299) {
+      router.refusals.push({ status: reply.status, ...(reply.body as Refusal) })
+    }
+    return {
+      value: {
+        status: reply.status,
+        ok: reply.status >= 200 && reply.status <= 299,
+        headers: { 'content-type': 'application/json' },
+        text: reply.body === undefined ? '' : JSON.stringify(reply.body),
+      },
+    }
+  })
+  on('session.id', () => {
+    router.reached.push('session.id')
+    return { value: id }
+  })
+  on('session.version', () => {
+    router.reached.push('session.version')
+    return { value: version }
+  })
+  on('env.set', (_$, e) => {
+    router.reached.push('env.set')
+    router.envWrites.push({ name: e.name, value: e.value })
+    return { value: undefined }
+  })
+  on('state.get', async (_$, e) => {
+    router.reached.push('state.get')
+    if (e.key === 'model' && modelDelayMs > 0) {
+      const ms = modelDelayMs
+      modelDelayMs = 0
+      await clock.sleep(ms)
+    }
+    if (e.key !== 'identity') return { value: { value: values.get(e.key), version: values.has(e.key) ? 1 : 0 } }
+    return { value: { value: identity, version: stateVersion } }
+  })
+  on('state.set', (_$, e) => {
+    router.reached.push('state.set')
+    if (e.key !== 'identity') {
+      values.set(e.key, e.value)
+      router.values.set(e.key, e.value)
+      return { value: { isSet: true, version: 1 } }
+    }
+    identity = e.value as Identity
+    stateVersion += 1
+    router.state = e.value as Identity
+    return { value: { isSet: true, version: stateVersion } }
+  })
+  on('store.get', (_$, e) => {
+    router.reached.push('store.get')
+    return { value: router.store.get(e.key) }
+  })
+  on('store.set', (_$, e) => {
+    router.reached.push('store.set')
+    // The host keeps JSON text, so a read gives back the value's JSON form.
+    router.store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  on('process.run', (_$, e) => {
+    router.reached.push('process.run')
+    router.commands.push([...e.argv])
+    if (options.process === undefined) return { deny: 'this host runs no command' }
+    return {
+      value: {
+        exitCode: 0,
+        stdout: `${options.process}\n`,
+        stderr: '',
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      },
+    }
+  })
+  on('ui.log', (_$, e) => {
+    router.reached.push('ui.log')
+    router.logs.push({ text: e.text, to: e.to })
+    return { value: undefined }
+  })
+  on('agent.list', async () => {
+    router.reached.push('agent.list')
+    if (listDelayMs > 0) {
+      const ms = listDelayMs
+      listDelayMs = 0
+      await clock.sleep(ms)
+    }
+    return { value: agents }
+  })
+
+  // The engine's own answers: what each event's bottom resolves to when nothing beneath the plugins rewrites it.
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('prompt.submit', (_$, e) => ({ text: e.text, context: e.context }))
+  on('prompt.edit', (_$, e) => ({ text: e.text, cursor: e.cursor }))
+  on('turn.step', async function* (_$, e) {
+    yield { kind: 'stop', stopReason: 'end_turn', usage: null }
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+  on('turn.complete', () => ({ text: '' }))
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  on('tool.call', async (_$, e) => {
+    const scripted = tools.shift()
+    if (scripted !== undefined) return { result: await scripted(e) }
+    const result = slots.tool ?? {}
+    slots.tool = undefined
+    return { result }
+  })
+  on('agent.spawn', async (_$, e) => {
+    const scripted = spawns.shift()
+    const recorded = scripted === undefined ? slots.spawn : await scripted()
+    slots.spawn = undefined
+    spawned += 1
+    return {
+      model: recorded?.model ?? e.parentModel ?? 'claude-haiku-4-5',
+      agentId: recorded?.agentId ?? `agent-${spawned}`,
+    }
+  })
+  return router
+}
+
+type Line = Record<string, unknown> & { t: number; kind: string }
+
+// Lines the mod never hooks, or that the engine raises around the events it does.
+const DROPPED = new Set(['session.append', 'session.receive', 'tick', 'tool.result', 'turn.start'])
+
+// The classic events the mod hooks, for the task registry they carry.
+const STOPS = new Set(['Stop', 'SubagentStop'])
+
+function text(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+/**
+ * Replays a recorded event log through the test's `$`: the clock moves to each line's time, the session id follows
+ * every line that names one, and each event the mod can hook fires in the shape the engine raises it.
+ */
+export async function replay($: Engine, _on: On, log: string, clock: MockClock, router: FakeRouter): Promise<void> {
+  const slots = replayed.get(router) as Replayed
+  const lines = log.split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line) as Line)
+  const answered = new Set<number>()
+  for (const [index, line] of lines.entries()) {
+    await clock.set(Math.max(line.t, clock.now()))
+    if (typeof line.id === 'string') router.setId(line.id)
+    if (DROPPED.has(line.kind)) continue
+    switch (line.kind) {
+      case 'session.start':
+        if (typeof line.version === 'object' && line.version !== null) router.setVersion(line.version as SessionVersion)
+        await $.session.start({
+          cwd: text(line.cwd),
+          surface: line.surface === 'terminal' ? 'terminal' : null,
+          isInteractive: line.isInteractive === true,
+        })
+        break
+      case 'prompt.submit':
+        await $.prompt.submit({
+          text: text(line.text),
+          origin: line.origin as { kind: 'composer' },
+          wait: false,
+        })
+        break
+      case 'tool.call': {
+        const result = lines.findIndex((later, at) =>
+          at > index && !answered.has(at) && later.kind === 'tool.result' && later.tool === line.tool)
+        if (result >= 0) {
+          answered.add(result)
+          const recorded = lines[result] as Line
+          slots.tool = {
+            ...(recorded.backgroundTaskId === undefined ? {} : { backgroundTaskId: recorded.backgroundTaskId }),
+            ...(recorded.resultAgentId === undefined ? {} : { agentId: recorded.resultAgentId }),
+          }
+        }
+        await $.tool.call({
+          tool: text(line.tool),
+          tool_use_id: text(line.toolUseId),
+          run_in_background: line.bg === true,
+          command: '',
+        } as Parameters<Engine['tool']['call']>[0])
+        break
+      }
+      case 'agent.spawn':
+        slots.spawn = line.result as Replayed['spawn']
+        // The engine fills the spawn's identity (its tool use, provider, parent model and fork) as a session does.
+        await $.agent.spawn(
+          { prompt: '', description: '', subagentType: text(line.type) } as Parameters<Engine['agent']['spawn']>[0],
+        )
+        break
+      case 'turn.step': {
+        const stream = $.turn.step({
+          turnId: text(line.turnId),
+          index: typeof line.index === 'number' ? line.index : 0,
+          model: text(line.model),
+          messageCount: 1,
+          ...(typeof line.agentId === 'string' ? { agentId: line.agentId } : {}),
+        })
+        for await (const _chunk of stream) {
+          // Read to the end, as the engine reads a step.
+        }
+        break
+      }
+      case 'turn.complete':
+        router.setAgents(Array.isArray(line.agents) ? (line.agents as { id: string; status: string }[]) : [])
+        await $.turn.complete({
+          turnId: text(line.turnId),
+          ...(typeof line.agentId === 'string' ? { agentId: line.agentId } : {}),
+          reason: (line.reason ?? 'answer') as 'answer',
+          answer: '',
+          durationMs: 0,
+          isAborted: line.reason === 'aborted',
+        })
+        break
+      case 'classic': {
+        const name = text(line.name)
+        if (!STOPS.has(name)) break
+        const classic = ($ as unknown as { classic: Record<string, (input: unknown) => Promise<unknown>> }).classic
+        await classic[name]?.({
+          ...(typeof line.agentId === 'string' ? { agent_id: line.agentId } : {}),
+          background_tasks: Array.isArray(line.backgroundTasks) ? line.backgroundTasks : [],
+          session_crons: [],
+        })
+        break
+      }
+      case 'session.end':
+        await $.session.end({
+          reason: line.reason as 'other',
+          sessionId: text(line.sessionId),
+          resume: line.resume as { id: string },
+        })
+        break
+    }
+  }
+  await clock.settle()
+}
