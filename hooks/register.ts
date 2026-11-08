@@ -23,8 +23,8 @@ export const register: Register = (on, options) => {
 
   // An earlier start's settings would otherwise keep the lifecycle reporting, the next session registering and the
   // tool reading under a URL and key this start no longer resolves, a report queued under that key would go out under
-  // a later start's, and an earlier start whose GET is still out would start the lifecycle once it lands. The
-  // heartbeat timer stays, its ticks doing nothing until a later start resolves settings.
+  // a later start's, and an earlier start whose GET is still out would act on its answer once it lands. The heartbeat
+  // timer stays, its ticks doing nothing until a later start resolves settings.
   function deactivate(): void {
     current = undefined
     clearSettings()
@@ -35,8 +35,12 @@ export const register: Register = (on, options) => {
   if (config.keepalive) installKeepalive(on)
 
   on('tool.call', { tool: TOOL_CALL }, async ($) => {
+    const sessionId = await $.session.id()
+    const now = await $.clock.now()
+    // current is read in the same synchronous step as answerCall's generation, so a start that lands during the two
+    // reads above cannot pair its generation with the settings it replaced.
     if (current === undefined) return errorAnswer(UNCONFIGURED)
-    return answerCall($, current, await $.session.id(), await $.clock.now())
+    return answerCall($, current, sessionId, now)
   }).catch((_$, _e, next) => {
     // A thrown error would fail the model's call, so the failure becomes the answer's text.
     const reason = next.error.message ?? next.error.kind
@@ -81,16 +85,16 @@ export const register: Register = (on, options) => {
       return next(e)
     }
     const sessionId = await $.session.id()
-    // A later start that began while this one's GET was out owns the configuration, so a stale check leaves it alone.
     // No await falls between setting current and startCheck's generation step, so the start that set current last is
     // the one whose check is not stale.
     current = resolution.settings
     const outcome = await startCheck($, resolution.settings, sessionId, client, config.notifications)
-    if (outcome === 'stale') return next(e)
+    // A later start that set or cleared current during the check owns the configuration, so this one leaves it alone.
+    if (outcome === 'stale' || current !== resolution.settings) return next(e)
     if (outcome === 'refused') {
       deactivate()
     } else if (config.keepalive) {
-      await startKeepalive($, resolution.settings)
+      await startKeepalive($, resolution.settings, () => current === resolution.settings)
     }
     return next(e)
   }).catch(($, e, next) => {

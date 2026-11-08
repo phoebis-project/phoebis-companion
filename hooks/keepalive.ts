@@ -1360,9 +1360,15 @@ async function fence($: EngineInterface): Promise<Identity> {
   return pair
 }
 
-/** Starts the lifecycle: the fence, the registration, the pump. Idempotent per session start. */
-export async function startKeepalive($: EngineInterface, resolved: Settings): Promise<void> {
+/**
+ * Starts the lifecycle: the fence, the registration, the pump. Idempotent per session start. `isCurrent` answers
+ * whether the start that resolved these settings still holds the configuration.
+ */
+export async function startKeepalive($: EngineInterface, resolved: Settings, isCurrent: () => boolean):
+  Promise<void> {
   if (!refused) identity = await fence($)
+  // A later session start can land while the fence awaits, and the settings it set or cleared must stand.
+  if (!isCurrent()) return
   settings = resolved
   if (active()) {
     const [defaultMs, maxMs] = await Promise.all([

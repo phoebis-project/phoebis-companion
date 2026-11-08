@@ -129,6 +129,8 @@ export type FakeRouter = {
    * A function that throws stands for a lower hook that rejects the edit.
    */
   answerEdit: (fn: () => PromptEditResult) => void
+  /** Holds the next `$.session.id()` for this long on the clock before it answers. */
+  delayId: (ms: number) => void
   /** Holds the next `$.agent.list()` for this long on the clock before it answers. */
   delayList: (ms: number) => void
   /** Holds the next `$.state.get` of the plugin's tracked work for this long on the clock before it answers. */
@@ -245,6 +247,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const edits: (() => PromptEditResult)[] = []
   const registerDenials: string[] = []
   const versionDenials: string[] = []
+  let idDelayMs = 0
   let listDelayMs = 0
   let modelDelayMs = 0
   // The agents the router holds per session, each with its generation.
@@ -307,6 +310,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     answerEdit: (fn) => {
       edits.push(fn)
+    },
+    delayId: (ms) => {
+      idDelayMs = ms
     },
     delayList: (ms) => {
       listDelayMs = ms
@@ -404,8 +410,13 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     }
     return { value: response(reply) }
   })
-  on('session.id', () => {
+  on('session.id', async () => {
     router.reached.push('session.id')
+    if (idDelayMs > 0) {
+      const ms = idDelayMs
+      idDelayMs = 0
+      await clock.sleep(ms)
+    }
     return { value: id }
   })
   on('session.version', () => {

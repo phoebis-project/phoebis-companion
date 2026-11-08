@@ -148,27 +148,6 @@ test('a reload whose start GET fails answers the error text, not the earlier bod
   expect(answer.content[0]?.text).toContain('connection refused')
 })
 
-test('a start GET that lands after a later start under another URL refilled the cache leaves the later body cached',
-  { options: { keepalive: false } }, async ($, on) => {
-    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY], ['ANTHROPIC_BASE_URL', ROUTER]])
-    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
-    const clock = mock.clock(on, { now: T0 })
-    const router = fakeRouter(on, clock)
-    router.answerGet(async () => {
-      await clock.sleep(1_000)
-      return { status: 200, body: SAMPLE_ALLOWANCE }
-    })
-    router.answerGet(() => ({ status: 200, body: OTHER_ALLOWANCE }))
-    const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
-    await clock.settle()
-    variables.set('ANTHROPIC_BASE_URL', 'http://127.0.0.1:2')
-    await start($, clock)
-    await clock.advance(1_000)
-    await first
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
-    expect(router.gets).toHaveLength(2)
-  })
-
 test('a call GET that lands after a later start under another URL refilled the cache leaves the later body cached',
   { options: { keepalive: false } }, async ($, on) => {
     const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY], ['ANTHROPIC_BASE_URL', ROUTER]])
@@ -238,8 +217,84 @@ test('a start with no key during an earlier start\'s GET leaves nothing reported
     await clock.settle()
     const answer = await call($)
     expect(router.requests).toEqual([])
+    expect(router.tools).toEqual([])
     expect(answer.isError).toBe(true)
     expect(router.gets).toHaveLength(1)
+  })
+
+test('the start whose session id read lands last holds the reports and the tool alone', async ($, on) => {
+  const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'k-a'], ['ANTHROPIC_BASE_URL', ROUTER]])
+  on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+  const clock = mock.clock(on, { now: T0 })
+  const router = fakeRouter(on, clock)
+  router.delayId(1_000)
+  const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  variables.set('ANTHROPIC_AUTH_TOKEN', 'k-b')
+  variables.set('ANTHROPIC_BASE_URL', 'http://127.0.0.1:2')
+  await start($, clock)
+  await clock.advance(1_000)
+  await first
+  await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+  await clock.settle()
+  // Past the cache window of the first start's read, so the call reads the router itself.
+  await clock.set(T0 + 12_000)
+  await call($)
+  expect(router.targets.at(-1)?.url).toBe(`${ROUTER}/v0/keepalive/events`)
+  expect(router.gets.at(-1)).toEqual({
+    url: `${ROUTER}/v0/companion/allowance?session_id=session-a`,
+    headers: { authorization: 'Bearer k-a' },
+  })
+})
+
+test('a start with no key during an earlier start\'s lifecycle fence leaves nothing reported', CONFIGURED,
+  async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])
+    const clock = mock.clock(on, { now: T0 })
+    let fenceHeld = false
+    // The fence's first read is held, so the second start lands after the first start's check and before its
+    // settings.
+    on('env.get', async (_$, e) => {
+      if (e.name === 'ANTHROPIC_CUSTOM_HEADERS' && !fenceHeld) {
+        fenceHeld = true
+        await clock.sleep(1_000)
+      }
+      return { value: variables.get(e.name) }
+    })
+    const router = fakeRouter(on, clock)
+    const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    variables.delete('ANTHROPIC_AUTH_TOKEN')
+    await start($, clock)
+    await clock.advance(1_000)
+    await first
+    await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    expect(router.requests).toEqual([])
+  })
+
+test('a call whose session id read a later start overtook reads under the later start\'s URL',
+  { options: { keepalive: false } }, async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY], ['ANTHROPIC_BASE_URL', ROUTER]])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    await start($, clock)
+    await clock.set(T0 + 10_000)
+    router.delayId(1_000)
+    const pending = call($)
+    await clock.settle()
+    variables.set('ANTHROPIC_BASE_URL', 'http://127.0.0.1:2')
+    // The later start's GET fails, so the cache holds no body the call could answer from.
+    router.answerGet(() => ({ fail: 'connection refused' }))
+    await start($, clock)
+    await clock.advance(1_000)
+    await pending
+    expect(router.gets.map((get) => get.url)).toEqual([
+      `${ROUTER}/v0/companion/allowance?session_id=session-a`,
+      'http://127.0.0.1:2/v0/companion/allowance?session_id=session-a',
+      'http://127.0.0.1:2/v0/companion/allowance?session_id=session-a',
+    ])
   })
 
 test('a start GET past the limit registers the tool and the session start is not held longer', CONFIGURED,
