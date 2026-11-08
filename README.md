@@ -1,4 +1,10 @@
-# Phoebis companion mod
+<!-- markdownlint-disable-file MD033 MD041 -->
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo-light.svg" alt="Phoebis Companion" width="360">
+  </picture>
+</div>
 
 A Claude Code plugin for sessions that reach Claude through Phoebis Router. The mod reports session liveness and agent
 state to the router, which reads the reports to decide which sessions' prompt caches to keep warm. At session start it
