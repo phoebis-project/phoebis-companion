@@ -8,7 +8,7 @@ const QUERY = 'a URL with a query'
 const NOT_HTTP = 'an http or https URL with a host'
 export const PREFIX = 'phoebis-companion: '
 
-export type Options = { managementUrl: string; token: string; keepalive: boolean; notifications: boolean }
+type Options = { managementUrl: string; token: string; keepalive: boolean; notifications: boolean }
 
 export type Settings = { url: string; key: string }
 

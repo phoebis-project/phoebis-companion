@@ -22,10 +22,10 @@ export type Body = Report & {
   request_generation?: number
 }
 
-export const MAIN = 'main'
+const MAIN = 'main'
 // The router's codes are snake_case words, so anything else an answer carries stays out of the log.
 const CODE = /^[a-z_]{1,64}$/
-export const EVENTS_PATH = '/v0/keepalive/events'
+const EVENTS_PATH = '/v0/keepalive/events'
 export const OWNER_HEADER = 'X-Keepalive-Owner-Id'
 // The loader lists what a $.state call names only from a reference no importer can change.
 const IDENTITY_REF = { plugin: 'phoebis-companion', key: 'identity' } as const
@@ -35,11 +35,11 @@ const MODEL_REF = { plugin: 'phoebis-companion', key: 'model' } as const
 // the newest alone.
 const IDENTITIES = 'identities'
 const KEPT_IDENTITIES = 8
-export const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000]
-export const HEARTBEAT_MIN_MS = 1000
-export const HEARTBEAT_MAX_MS = 25000
+const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000]
+const HEARTBEAT_MIN_MS = 1000
+const HEARTBEAT_MAX_MS = 25000
 
-export type SessionRecord = {
+type SessionRecord = {
   id: string
   instance: string
   owner: string
@@ -55,7 +55,7 @@ export type SessionRecord = {
   heartbeatAt?: number
 }
 
-export type Queue = {
+type Queue = {
   reports: Report[]
   inFlight?: { report: Report }
   attempt: number
@@ -79,7 +79,7 @@ export type AgentRecord = {
 
 type ParkFields = { park_kind: 'background' | 'scheduled' | 'both'; wake_at?: number; deadline?: number }
 
-export type Park = { state: 'idle' } | ({ state: 'parked' } & ParkFields)
+type Park = { state: 'idle' } | ({ state: 'parked' } & ParkFields)
 
 export const PRESENCE_THROTTLE_MS = 60000
 export const DEFAULT_COMMAND_TIMEOUT_MS = 1800000
@@ -306,11 +306,11 @@ export function heartbeatInterval(leaseExpiresMs: number, nowMs: number): number
   return Math.min(HEARTBEAT_MAX_MS, Math.max(HEARTBEAT_MIN_MS, Math.floor((leaseExpiresMs - nowMs) / 3)))
 }
 
-export function backoff(attempt: number): number {
+function backoff(attempt: number): number {
   return BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] as number
 }
 
-export function buildBody(session: SessionRecord, report: Report, nowMs: number): Body {
+function buildBody(session: SessionRecord, report: Report, nowMs: number): Body {
   session.sequence = nextSequence(session.sequence, nowMs)
   // The router fences the session's requests by the owner its registration names, so every registration names it.
   const fenced: Report = report.event === 'session_start' ? { ...report, owner_id: session.owner } : report
