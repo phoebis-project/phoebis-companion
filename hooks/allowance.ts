@@ -46,8 +46,8 @@ const DESCRIPTION = [
 
 type Fetched = { status: number; text: string } | { failure: string }
 
-/** What the start check does with the answer. */
-type StartOutcome = 'register' | 'not_permitted' | 'refused' | 'unreachable'
+/** What the start check does with the answer, or `stale` when a later start began while its GET was out. */
+type StartOutcome = 'register' | 'not_permitted' | 'refused' | 'stale' | 'unreachable'
 
 type ToolAnswer = { result: { content: { type: 'text'; text: string }[]; isError?: true } }
 
@@ -55,8 +55,8 @@ const NOT_PERMITTED = `${PREFIX}this key may not read the allowance`
 
 // The entry names its session, since a /clear starts a new session id with no session.start to clear the cache.
 let cache: { at: number; sessionId: string; text: string } | undefined
-// An earlier start's GET can land after a later start refilled the cache, so a writer caches its body only while no
-// start has begun since its GET went out.
+// An earlier start's GET can land after a later start began and refilled the cache, so a GET's answer counts only
+// while no start has begun since the GET went out.
 let generation = 0
 
 /** True for a text that parses as a JSON object with `protocol: 1`, which is what the allowance route answers. */
@@ -151,7 +151,8 @@ async function registerTool($: EngineInterface, client: string): Promise<void> {
 
 /**
  * The start check: the cache cleared, one GET bounded by WAIT_MS, the transcript or debug line with its toast, and the
- * tool's registration on every outcome but a refused key and a withheld permission.
+ * tool's registration on every outcome but a refused key and a withheld permission. A check whose GET a later start
+ * overtook answers `stale` and does nothing after the GET.
  */
 export async function startCheck($: EngineInterface, settings: Settings, sessionId: string, client: string,
   notifications: boolean): Promise<StartOutcome> {
@@ -161,9 +162,10 @@ export async function startCheck($: EngineInterface, settings: Settings, session
   cache = undefined
   const now = await $.clock.now()
   const fetched = await fetchWithin($, settings, sessionId)
+  if (sent !== generation) return 'stale'
   const body = allowanceOf(fetched)
   const outcome = outcomeOf(fetched, body)
-  if (body !== undefined && sent === generation) cache = { at: now, sessionId, text: body }
+  if (body !== undefined) cache = { at: now, sessionId, text: body }
   if (outcome === 'not_permitted') $.ui.log(NOT_PERMITTED, { to: 'debug' })
   if (outcome === 'refused' || outcome === 'unreachable') {
     const line = outcome === 'refused'

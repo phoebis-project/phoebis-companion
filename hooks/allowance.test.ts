@@ -192,6 +192,32 @@ test('a call GET that lands after a later start under another URL refilled the c
     expect(router.gets).toHaveLength(3)
   })
 
+test('an overtaken start leaves the reports and the tool to the later start under another URL and key',
+  async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'k-a'], ['ANTHROPIC_BASE_URL', ROUTER]])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    router.answerGet(async () => {
+      await clock.sleep(1_000)
+      return { status: 200, body: SAMPLE_ALLOWANCE }
+    })
+    router.answerGet(() => ({ status: 200, body: OTHER_ALLOWANCE }))
+    const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    variables.set('ANTHROPIC_AUTH_TOKEN', 'k-b')
+    variables.set('ANTHROPIC_BASE_URL', 'http://127.0.0.1:2')
+    await start($, clock)
+    await clock.advance(1_000)
+    await first
+    await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'activity'])
+    expect(router.headers.map((headers) => headers.Authorization)).toEqual(['Bearer k-b', 'Bearer k-b'])
+    expect(router.tools).toHaveLength(1)
+    expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
+  })
+
 test('a start GET past the limit registers the tool and the session start is not held longer', CONFIGURED,
   async ($, on) => {
     const { clock, router } = host(on)

@@ -77,8 +77,13 @@ export const register: Register = (on, options) => {
       if (config.notifications) $.ui.toast(line)
       return next(e)
     }
+    const sessionId = await $.session.id()
+    // A later start that began while this one's GET was out owns the configuration, so a stale check leaves it alone.
+    // No await falls between setting current and startCheck's generation step, so the start that set current last is
+    // the one whose check is not stale.
     current = resolution.settings
-    const outcome = await startCheck($, resolution.settings, await $.session.id(), client, config.notifications)
+    const outcome = await startCheck($, resolution.settings, sessionId, client, config.notifications)
+    if (outcome === 'stale') return next(e)
     if (outcome === 'refused') {
       deactivate()
     } else if (config.keepalive) {
