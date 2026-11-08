@@ -144,15 +144,14 @@ test('the token hook forwards the trimmed value to the writer', CONFIGURED, asyn
 })
 
 describe('a missing setting raises a toast beside its transcript line only while notifications is on', () => {
-  const cases = [['on by default', {}, ['ui.toast']], ['off', { notifications: false }, []]] as const
+  const line = 'phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL'
+  const cases = [['on by default', {}, [line]], ['off', { notifications: false }, []]] as const
   for (const [name, options, toasts] of cases) {
     test(name, { options }, async ($, on) => {
       const { clock, router } = host(on)
       await start($, clock)
-      expect(router.logs).toEqual([
-        { text: 'phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL', to: 'transcript' },
-      ])
-      expect(router.reached.filter((op) => op === 'ui.toast')).toEqual(toasts)
+      expect(router.logs).toEqual([{ text: line, to: 'transcript' }])
+      expect(router.toasts).toEqual(toasts)
     })
   }
 })
@@ -176,14 +175,10 @@ test('a start that finds no router key leaves nothing reported under the setting
     ])
   })
 
-// The kit has no test.skip, so this declares a test without running it.
-function skip(..._declared: Parameters<typeof test>): void {}
-
-// Skipped until the fake host answers the allowance GET, which the start check sends whatever the keepalive switch.
-skip('keepalive off sends no session_start while the allowance GET still goes out', CONFIGURED_OFF,
+test('keepalive off sends no session_start while the allowance GET still goes out', CONFIGURED_OFF,
   async ($, on) => {
     const { clock, router } = host(on)
     await start($, clock)
-    const targets = router.targets.map((t) => `${t.method} ${t.url}`)
-    expect(targets).toStrictEqual([`GET ${ROUTER}/v0/companion/allowance?session_id=session-a`])
+    expect(router.gets.map((get) => get.url)).toStrictEqual([`${ROUTER}/v0/companion/allowance?session_id=session-a`])
+    expect(router.requests).toStrictEqual([])
   })

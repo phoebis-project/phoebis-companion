@@ -1,18 +1,34 @@
-import type { AgentInfo, AgentStatus, ConfigSetResult, ConfigValue, On, SessionVersion } from 'claude-code'
+import type {
+  AgentInfo,
+  AgentStatus,
+  ConfigSetResult,
+  ConfigValue,
+  HttpResponse,
+  On,
+  RegisteredToolSpec,
+  SessionVersion,
+} from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { Identity } from '../types/index.d.ts'
 import type { Ack, Body, Refusal } from './keepalive.ts'
 
-// The recorded host beneath every mod test: the router behind `$.http.fetch`, the session's id and version, the
-// environment writes, the state the host holds for the plugin, the plugin's own store, the command that reads the
-// client process, the log and the toasts, the agent list, and the engine's own answers to the events a replay or a
-// settings change raises, so no bottom hook throws for an event the mod passes on.
+// The recorded host beneath every mod test: the router behind `$.http.fetch` (the posted reports and the allowance
+// GETs), the session's id and version, the environment writes, the state the host holds for the plugin, the plugin's
+// own store, the command that reads the client process, the log, the toasts, the tools the mod registers, the agent
+// list, and the engine's own answers to the events a replay or a settings change raises, so no bottom hook throws for
+// an event the mod passes on.
 
-/** What the router answers one request with: a status and a JSON body, or a transport failure. */
+/**
+ * What the router answers one request with: a status and a body, or a transport failure. A body that is a string is
+ * sent as it is, for a page that is no JSON, such as the console page the admin listener serves for an unknown path.
+ */
 export type Reply = { status: number; body?: unknown } | { fail: string }
 
 /** A scripted answer, handed the request's body and the acknowledgment the router would send by default. */
 export type Answer = (body: Body, ack: Ack) => Reply | Promise<Reply>
+
+/** A scripted answer to a GET, handed its URL and its headers with lower-cased names. */
+export type GetAnswer = (url: string, headers: Record<string, string>) => Reply | Promise<Reply>
 
 export type FakeOptions = {
   /** What `$.session.id()` answers until `setId` changes it. */
@@ -47,14 +63,23 @@ export type FakeRouter = {
   refusals: (Refusal & { status: number })[]
   /** Every `$.ui.log` line with its sink. */
   logs: LogLine[]
-  /** The headers of every request, in order. */
+  /** The headers of every posted report, in order. */
   headers: Record<string, string>[]
-  /** The method and URL of every request, in order. */
+  /** The method and URL of every posted report, in order. */
   targets: { method: string; url: string }[]
-  /** The clock's time as each request arrived, in order. */
+  /** The clock's time as each posted report arrived, in order. */
   times: number[]
   /** The op stubs the mod reached, by event name, in order. */
   reached: string[]
+  /**
+   * Every GET with its URL and its headers, the names lower-cased as a server reads them, apart from the posted
+   * reports the lists above record.
+   */
+  gets: { url: string; headers: Record<string, string> }[]
+  /** Every spec the mod registered through `$.tool.register`, in order. */
+  tools: RegisteredToolSpec[]
+  /** The text of every `$.ui.toast`, in order. */
+  toasts: string[]
   /** Every `$.env.set` with its name and value, in order. */
   envWrites: EnvWrite[]
   /** The identity the mod wrote through `$.state.set`, absent until it writes one. */
@@ -77,6 +102,8 @@ export type FakeRouter = {
   setVersion: (version: SessionVersion) => void
   /** Replaces the default answer for the next request, and several calls answer the next requests in turn. */
   answer: (fn: Answer) => void
+  /** Replaces the default answer, a `200` with `SAMPLE_ALLOWANCE`, for the next GET, and several calls queue up. */
+  answerGet: (fn: GetAnswer) => void
   /**
    * Scripts the result of the next hand-built `tool.call`, and several calls answer the next calls in turn. A
    * function that answers a promise holds the call until it settles, as a tool that runs for a while does.
@@ -95,6 +122,54 @@ type Replayed = { tool?: unknown; spawn?: { model?: string; agentId?: string } }
 const replayed = new WeakMap<FakeRouter, Replayed>()
 
 export const LEASE_MS = 90000
+
+/** The allowance route's answer with one account, one window and one pin, as the router's fixture shapes it. */
+export const SAMPLE_ALLOWANCE = {
+  protocol: 1,
+  now: '2026-11-08T12:00:00Z',
+  pool: { ceiling: 0.95, pinning: 'always', strategy: 'priority' },
+  accounts: [{
+    id: 'bbbbbbbb',
+    funding: 'plan',
+    tier: 'default_claude_max_20x',
+    obstacle: null,
+    pace_score: 0.5,
+    slow_down: null,
+    windows: {
+      five_hour: {
+        utilization: 0.25,
+        horizon_at: '2026-11-08T14:00:00Z',
+        burn_per_hour: 0.1,
+        demand_per_hour: 0.1,
+        projected_at_horizon: 0.45,
+        runway_minutes: 420,
+      },
+    },
+    spend: [],
+  }],
+  pins: [{
+    agent: 'main',
+    model: 'claude-sonnet-4-5',
+    account: 'bbbbbbbb',
+    placed_at: '2026-11-08T11:50:00Z',
+    last_used_at: '2026-11-08T12:00:00Z',
+    warm: true,
+    warm_until: '2026-11-08T12:05:00Z',
+    runway_minutes: 420,
+    binding_window: 'five_hour',
+    slow_down: null,
+  }],
+}
+
+function response(reply: { status: number; body?: unknown }): HttpResponse {
+  const { status, body } = reply
+  return {
+    status,
+    ok: status >= 200 && status <= 299,
+    headers: { 'content-type': typeof body === 'string' ? 'text/html' : 'application/json' },
+    text: typeof body === 'string' ? body : body === undefined ? '' : JSON.stringify(body),
+  }
+}
 
 const EVENT_FIELDS: Record<string, { required: string[]; optional: string[] }> = {
   activity: { required: ['agent_id', 'kind'], optional: ['request_generation'] },
@@ -138,9 +213,11 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   on('classic.Stop', async () => ({}))
   on('classic.SubagentStop', async () => ({}))
   let id = options.id ?? 'session-a'
-  let version: SessionVersion = { version: options.version ?? '2.1.292', base: options.version ?? '2.1.292' }
+  // The oldest client that gets the allowance tool, so a test names a version only where the version is the point.
+  let version: SessionVersion = { version: options.version ?? '2.1.293', base: options.version ?? '2.1.293' }
   let agents: AgentInfo[] = []
   const answers: Answer[] = []
+  const getAnswers: GetAnswer[] = []
   const tools: ((e: { tool: string }) => unknown)[] = []
   const spawns: (() => { agentId: string } | Promise<{ agentId: string }>)[] = []
   let listDelayMs = 0
@@ -163,6 +240,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     targets: [],
     times: [],
     reached: [],
+    gets: [],
+    tools: [],
+    toasts: [],
     envWrites: [],
     values: new Map(),
     store: new Map(Object.entries(options.store ?? {})),
@@ -190,6 +270,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     answer: (fn) => {
       answers.push(fn)
+    },
+    answerGet: (fn) => {
+      getAnswers.push(fn)
     },
     answerTool: (fn) => {
       tools.push(fn)
@@ -241,6 +324,15 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   on('http.fetch', async (_$, e) => {
     router.reached.push('http.fetch')
     const init = e.init ?? {}
+    if (init.body === undefined) {
+      const headers = Object.fromEntries(
+        Object.entries(init.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
+      )
+      router.gets.push({ url: e.url, headers })
+      const scripted = getAnswers.shift()
+      const reply = scripted === undefined ? { status: 200, body: SAMPLE_ALLOWANCE } : await scripted(e.url, headers)
+      return 'fail' in reply ? { deny: reply.fail } : { value: response(reply) }
+    }
     router.targets.push({ method: init.method ?? 'GET', url: e.url })
     router.times.push(clock.now())
     router.headers.push({ ...(init.headers ?? {}) })
@@ -276,14 +368,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     if (reply.status < 200 || reply.status > 299) {
       router.refusals.push({ status: reply.status, ...(reply.body as Refusal) })
     }
-    return {
-      value: {
-        status: reply.status,
-        ok: reply.status >= 200 && reply.status <= 299,
-        headers: { 'content-type': 'application/json' },
-        text: reply.body === undefined ? '' : JSON.stringify(reply.body),
-      },
-    }
+    return { value: response(reply) }
   })
   on('session.id', () => {
     router.reached.push('session.id')
@@ -349,9 +434,15 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     router.logs.push({ text: e.text, to: e.to })
     return { value: undefined }
   })
-  on('ui.toast', () => {
+  on('ui.toast', (_$, e) => {
     router.reached.push('ui.toast')
+    router.toasts.push(e.text)
     return { value: undefined }
+  })
+  on('tool.register', (_$, e) => {
+    router.reached.push('tool.register')
+    router.tools.push(e)
+    return { value: { tool: `mcp__phoebis-companion__${e.name}` } }
   })
   on('agent.list', async () => {
     router.reached.push('agent.list')
