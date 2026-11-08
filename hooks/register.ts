@@ -1,5 +1,5 @@
 import type { Register } from 'claude-code'
-import { answerCall, errorAnswer, startCheck, TOOL_CALL } from './allowance.ts'
+import { answerCall, errorAnswer, retireStarts, startCheck, TOOL_CALL } from './allowance.ts'
 import { clearSettings, emptyQueue, installKeepalive, MINIMUM_VERSION, startKeepalive } from './keepalive.ts'
 import { optionsOf, PREFIX, redactSecrets, resolveSettings, urlProblem, versionAtLeast } from './settings.ts'
 import type { Resolution, Settings } from './settings.ts'
@@ -22,12 +22,14 @@ export const register: Register = (on, options) => {
   const config = optionsOf(options)
 
   // An earlier start's settings would otherwise keep the lifecycle reporting, the next session registering and the
-  // tool reading under a URL and key this start no longer resolves, and a report queued under that key would go out
-  // under a later start's. The heartbeat timer stays, its ticks doing nothing until a later start resolves settings.
+  // tool reading under a URL and key this start no longer resolves, a report queued under that key would go out under
+  // a later start's, and an earlier start whose GET is still out would start the lifecycle once it lands. The
+  // heartbeat timer stays, its ticks doing nothing until a later start resolves settings.
   function deactivate(): void {
     current = undefined
     clearSettings()
     emptyQueue()
+    retireStarts()
   }
 
   if (config.keepalive) installKeepalive(on)

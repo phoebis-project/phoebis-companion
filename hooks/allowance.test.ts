@@ -218,6 +218,30 @@ test('an overtaken start leaves the reports and the tool to the later start unde
     expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
   })
 
+test('a start with no key during an earlier start\'s GET leaves nothing reported and the tool unconfigured',
+  CONFIGURED, async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    router.answerGet(async () => {
+      await clock.sleep(1_000)
+      return { status: 200, body: SAMPLE_ALLOWANCE }
+    })
+    const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    variables.delete('ANTHROPIC_AUTH_TOKEN')
+    await start($, clock)
+    await clock.advance(1_000)
+    await first
+    await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    const answer = await call($)
+    expect(router.requests).toEqual([])
+    expect(answer.isError).toBe(true)
+    expect(router.gets).toHaveLength(1)
+  })
+
 test('a start GET past the limit registers the tool and the session start is not held longer', CONFIGURED,
   async ($, on) => {
     const { clock, router } = host(on)
