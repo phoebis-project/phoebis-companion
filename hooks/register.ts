@@ -20,6 +20,15 @@ export const register: Register = (on, options) => {
   // The options hold for the activation: a change reloads the plugin and runs register again.
   const config = optionsOf(options)
 
+  // An earlier start's settings would otherwise keep the lifecycle reporting, the next session registering and the
+  // tool reading under a URL and key this start no longer resolves, and a report queued under that key would go out
+  // under a later start's. The heartbeat timer stays, its ticks doing nothing until a later start resolves settings.
+  function deactivate(): void {
+    current = undefined
+    clearSettings()
+    emptyQueue()
+  }
+
   if (config.keepalive) installKeepalive(on)
 
   on('tool.call', { tool: TOOL_CALL }, async ($) => {
@@ -63,10 +72,7 @@ export const register: Register = (on, options) => {
       const line = 'problem' in resolution
         ? `${MISSING[resolution.missing]} (${resolution.problem})`
         : MISSING[resolution.missing]
-      // An earlier start's settings would otherwise keep the lifecycle reporting, and the next session registering,
-      // under a URL and key this start no longer resolves.
-      clearSettings()
-      current = undefined
+      deactivate()
       $.ui.log(line)
       if (config.notifications) $.ui.toast(line)
       return next(e)
@@ -74,14 +80,18 @@ export const register: Register = (on, options) => {
     current = resolution.settings
     const outcome = await startCheck($, resolution.settings, await $.session.id(), client, config.notifications)
     if (outcome === 'refused') {
-      // The keepalive route's own 401 empties the queue and cancels the heartbeat timer. Here the held settings go
-      // instead, so an earlier start's key sends nothing more and the timer's ticks do nothing until a later start
-      // resolves settings again.
-      emptyQueue()
-      clearSettings()
+      deactivate()
     } else if (config.keepalive) {
       await startKeepalive($, resolution.settings)
     }
     return next(e)
-  }).catch(($, e, next) => next(e)) // A failure inside the mod never changes the event.
+  }).catch(($, e, next) => {
+    const key = current?.key ?? ''
+    deactivate()
+    const reason = next.error.message ?? next.error.kind
+    $.ui.log(redactSecrets(`${PREFIX}the session start hook failed (${reason}), so this session reports nothing`, key),
+      { to: 'debug' })
+    // A failure inside the mod never changes the event.
+    return next(e)
+  })
 }

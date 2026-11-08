@@ -135,6 +135,8 @@ export type FakeRouter = {
   delayModel: (ms: number) => void
   /** Denies the next `$.tool.register` with the reason, as an engine that refuses the spec does. */
   denyRegister: (reason: string) => void
+  /** Denies the next `$.session.version()` with the reason, as a host that cannot read the client's version does. */
+  denyVersion: (reason: string) => void
 }
 
 type Replayed = { tool?: unknown; spawn?: { model?: string; agentId?: string } }
@@ -242,6 +244,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const spawns: (() => { agentId: string } | Promise<{ agentId: string }>)[] = []
   const edits: (() => PromptEditResult)[] = []
   const registerDenials: string[] = []
+  const versionDenials: string[] = []
   let listDelayMs = 0
   let modelDelayMs = 0
   // The agents the router holds per session, each with its generation.
@@ -313,6 +316,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     denyRegister: (reason) => {
       registerDenials.push(reason)
+    },
+    denyVersion: (reason) => {
+      versionDenials.push(reason)
     },
   }
   const slots: Replayed = {}
@@ -404,6 +410,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   })
   on('session.version', () => {
     router.reached.push('session.version')
+    const denial = versionDenials.shift()
+    if (denial !== undefined) return { deny: denial }
     return { value: version }
   })
   on('env.set', (_$, e) => {

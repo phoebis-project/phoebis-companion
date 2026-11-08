@@ -252,6 +252,44 @@ test('a valid key at a later start under the same session id sends nothing queue
     expect(router.headers.slice(2).map((headers) => headers.Authorization)).toEqual(['Bearer k-c'])
   })
 
+test('a valid key at a later start under the same session id sends nothing queued before a start with no key',
+  CONFIGURED, async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'k-a']])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    await start($, clock)
+    // The 503 leaves the activity waiting in the queue for its retry.
+    router.answer(() => ({ status: 503 }))
+    await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'activity'])
+    variables.delete('ANTHROPIC_AUTH_TOKEN')
+    await start($, clock)
+    variables.set('ANTHROPIC_AUTH_TOKEN', 'k-c')
+    await start($, clock)
+    // The retry falls due first, so a report the start with no key left queued would go out before the prompt's own.
+    await clock.advance(2_000)
+    await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    expect(router.requests.slice(2).map((body) => body.event)).toEqual(['activity'])
+    expect(router.headers.slice(2).map((headers) => headers.Authorization)).toEqual(['Bearer k-c'])
+  })
+
+test('a session start that fails leaves the tool unconfigured and the next prompt sends nothing', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    router.denyVersion('the version could not be read')
+    await start($, clock)
+    const answer = await call($)
+    await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    expect(answer.isError).toBe(true)
+    expect(router.gets).toHaveLength(1)
+    expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
+  })
+
 test('a second session start registers the tool again under the same name', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on)
   await start($, clock)
