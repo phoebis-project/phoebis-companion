@@ -1,12 +1,12 @@
-import type { AgentInfo, AgentStatus, On, SessionVersion } from 'claude-code'
+import type { AgentInfo, AgentStatus, ConfigSetResult, ConfigValue, On, SessionVersion } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { Identity } from '../types/index.d.ts'
 import type { Ack, Body, Refusal } from './keepalive.ts'
 
 // The recorded host beneath every mod test: the router behind `$.http.fetch`, the session's id and version, the
 // environment writes, the state the host holds for the plugin, the plugin's own store, the command that reads the
-// client process, the log, the agent list, and the engine's own answers to the events a replay raises, so no bottom
-// hook throws for an event the mod passes on.
+// client process, the log and the toasts, the agent list, and the engine's own answers to the events a replay or a
+// settings change raises, so no bottom hook throws for an event the mod passes on.
 
 /** What the router answers one request with: a status and a JSON body, or a transport failure. */
 export type Reply = { status: number; body?: unknown } | { fail: string }
@@ -36,6 +36,10 @@ export type LogLine = { text: string; to: string }
 
 export type EnvWrite = { name: string; value: string | undefined }
 
+export type ConfigWrite = { key: string; value: ConfigValue }
+
+export type ConfigChange = { key: string; value: ConfigValue; previous: ConfigValue }
+
 export type FakeRouter = {
   /** Every body the mod posted, in order. */
   requests: Body[]
@@ -61,6 +65,13 @@ export type FakeRouter = {
   store: Map<string, unknown>
   /** The argument vector of every `$.process.run`, in order. */
   commands: (readonly string[])[]
+  /** Every `config.set` that reached the writer beneath the hooks, with the value the last `next` carried, in order. */
+  configWrites: ConfigWrite[]
+  /**
+   * Changes one of the plugin's rows as the person does in the `/config` menu: the `config.set` event runs through
+   * the hooks, and the fake writes what reaches the bottom, as the engine's writer does.
+   */
+  setConfig: ($: Engine, change: ConfigChange) => Promise<ConfigSetResult>
   setId: (id: string) => void
   setAgents: (list: readonly { id: string; status: string; type?: string; parentId?: string }[]) => void
   setVersion: (version: SessionVersion) => void
@@ -156,6 +167,12 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     values: new Map(),
     store: new Map(Object.entries(options.store ?? {})),
     commands: [],
+    configWrites: [],
+    setConfig: ($, change) => $.config.set({
+      ...change,
+      provider: { plugin: 'phoebis-companion', tier: 'user' },
+      origin: { kind: 'composer' },
+    }),
     setId: (next) => {
       id = next
     },
@@ -332,6 +349,10 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     router.logs.push({ text: e.text, to: e.to })
     return { value: undefined }
   })
+  on('ui.toast', () => {
+    router.reached.push('ui.toast')
+    return { value: undefined }
+  })
   on('agent.list', async () => {
     router.reached.push('agent.list')
     if (listDelayMs > 0) {
@@ -352,6 +373,10 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   })
   on('turn.complete', () => ({ text: '' }))
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  on('config.set', (_$, e) => {
+    router.configWrites.push({ key: e.key, value: e.value })
+    return { value: e.value }
+  })
   on('tool.call', async (_$, e) => {
     const scripted = tools.shift()
     if (scripted !== undefined) return { result: await scripted(e) }

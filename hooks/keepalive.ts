@@ -1445,6 +1445,11 @@ export async function startKeepalive($: EngineInterface, resolved: Settings): Pr
   }
 }
 
+/** Drops the held settings, so the lifecycle reports nothing until a later start resolves them again. */
+export function clearSettings(): void {
+  settings = undefined
+}
+
 export function installKeepalive(on: On, enabled: () => boolean): void {
   on('prompt.submit', async ($, e, next) => {
     if (!enabled()) return next(e)
