@@ -12,7 +12,6 @@ import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   isRealPrompt,
   MAX_COMMAND_TIMEOUT_MS,
-  nextCronFire,
   nextFireAt,
   parkOf,
   PRESENCE_THROTTLE_MS,
@@ -487,26 +486,26 @@ describe('BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS read at session start 
     }
   })
 
-test('nextCronFire reads a five field expression in local time and answers nothing for one that never fires', () => {
+test('nextFireAt reads a five field expression in local time and answers nothing for one that never fires', () => {
   const now = local(14, 10, 0)
-  expect(nextCronFire('0 9 * * 1', now)).toBe(local(19, 9, 0))
-  expect(nextCronFire('*/15 * * * *', now)).toBe(local(14, 10, 15))
-  expect(nextCronFire('*/15 * * * *', local(14, 10, 7, 30))).toBe(local(14, 10, 15))
-  expect(nextCronFire('* * * * *', now)).toBe(local(14, 10, 1))
-  expect(nextCronFire('* * * * *', local(14, 9, 59, 30))).toBe(now)
-  expect(nextCronFire('0 0 31 2 *', now)).toBeUndefined()
+  expect(nextFireAt('0 9 * * 1', now, '00000000', false)).toBe(local(19, 9, 0))
+  expect(nextFireAt('*/15 * * * *', now, '00000000', false)).toBe(local(14, 10, 15))
+  expect(nextFireAt('*/15 * * * *', local(14, 10, 7, 30), '00000000', false)).toBe(local(14, 10, 15))
+  expect(nextFireAt('* * * * *', now, '00000000', false)).toBe(local(14, 10, 1))
+  expect(nextFireAt('* * * * *', local(14, 9, 59, 30), '00000000', false)).toBe(now)
+  expect(nextFireAt('0 0 31 2 *', now, '00000000', false)).toBeUndefined()
   // Lists, ranges with steps, Sunday as 7, and a day of month or a day of week when both are given.
-  expect(nextCronFire('30 14 1-3,20 * *', now)).toBe(local(20, 14, 30))
-  expect(nextCronFire('0 9-17/4 * * *', now)).toBe(local(14, 13, 0))
-  expect(nextCronFire('0 12 * * 7', now)).toBe(local(18, 12, 0))
-  expect(nextCronFire('0 12 16 * 1', now)).toBe(local(16, 12, 0))
-  expect(nextCronFire('0 12 20 * 1', now)).toBe(local(19, 12, 0))
+  expect(nextFireAt('30 14 1-3,20 * *', now, '00000000', false)).toBe(local(20, 14, 30))
+  expect(nextFireAt('0 9-17/4 * * *', now, '00000000', false)).toBe(local(14, 13, 0))
+  expect(nextFireAt('0 12 * * 7', now, '00000000', false)).toBe(local(18, 12, 0))
+  expect(nextFireAt('0 12 16 * 1', now, '00000000', false)).toBe(local(16, 12, 0))
+  expect(nextFireAt('0 12 20 * 1', now, '00000000', false)).toBe(local(19, 12, 0))
   // A fire months away is found, as the client's bounded walk finds it. A field out of range, a name and a short
   // expression answer nothing.
-  expect(nextCronFire('0 9 1 1 *', now)).toBe(new Date(2027, 0, 1, 9, 0).getTime())
-  expect(nextCronFire('60 * * * *', now)).toBeUndefined()
-  expect(nextCronFire('0 9 * * MON', now)).toBeUndefined()
-  expect(nextCronFire('* * * *', now)).toBeUndefined()
+  expect(nextFireAt('0 9 1 1 *', now, '00000000', false)).toBe(new Date(2027, 0, 1, 9, 0).getTime())
+  expect(nextFireAt('60 * * * *', now, '00000000', false)).toBeUndefined()
+  expect(nextFireAt('0 9 * * MON', now, '00000000', false)).toBeUndefined()
+  expect(nextFireAt('* * * *', now, '00000000', false)).toBeUndefined()
 })
 
 test('a stop event\'s task registry closes the commands it no longer runs wherever they are open, and a subagent ' +
@@ -1762,6 +1761,7 @@ test('a reload in the same session restores the tracked work before the registra
     }],
     crons: [],
     released: [],
+    routerReleased: [],
   }
   const { clock, router } = reloaded(on, saved)
   router.answer((_body, ack) => ok({ ...ack, agents: [{ agent_id: 'main', state: 'parked', request_generation: 1 }] }))
@@ -1864,6 +1864,7 @@ test('the released set survives a reload, so a registration that still names the
       agents: [{ id: 'main', state: 'idle', open: [], lastPresence: 0 }],
       crons: [],
       released: ['agent-1'],
+      routerReleased: [],
     }
     const { clock, router } = reloaded(on, saved)
     router.setAgents([{ id: 'agent-1', status: 'waiting' }])

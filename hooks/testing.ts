@@ -10,13 +10,25 @@ import type {
 } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { Identity } from '../types/index.d.ts'
-import type { Ack, Body, Refusal } from './keepalive.ts'
+import type { Body } from './keepalive.ts'
 
 // The recorded host beneath every mod test: the router behind `$.http.fetch` (the posted reports and the allowance
 // GETs), the session's id and version, the environment writes, the state the host holds for the plugin, the plugin's
 // own store, the command that reads the client process, the log, the toasts, the tools the mod registers, the agent
 // list, and the engine's own answers to the events a replay or a settings change raises, so no bottom hook throws for
 // an event the mod passes on.
+
+type Ack = {
+  session_id: string
+  instance_id: string
+  sequence: number
+  lease_expires_ms: number
+  agent_id?: string
+  request_generation?: number
+  agents?: { agent_id: string; state: string; request_generation: number }[]
+}
+
+type Refusal = { code: string; instance_id?: string; request_generation?: number }
 
 /**
  * What the router answers one request with: a status and a body, or a transport failure. A body that is a string is

@@ -42,30 +42,14 @@ export type Body = Report & {
   request_generation?: number
 }
 
-export type Ack = {
-  session_id: string
-  instance_id: string
-  sequence: number
-  lease_expires_ms: number
-  agent_id?: string
-  request_generation?: number
-  agents?: { agent_id: string; state: string; request_generation: number }[]
-}
-
-export type Refusal = { code: string; instance_id?: string; request_generation?: number }
-
 export const MAIN = 'main'
 // The router's codes are snake_case words, so anything else an answer carries stays out of the log.
 const CODE = /^[a-z_]{1,64}$/
 export const EVENTS_PATH = '/v0/keepalive/events'
 export const OWNER_HEADER = 'X-Keepalive-Owner-Id'
-export const INSTANCE_VARIABLE = 'PHOEBIS_KEEPALIVE_INSTANCE'
-// The loader lists what a $.state call names only from a reference no importer can change, so the calls name this
-// one and IDENTITY is its copy.
+// The loader lists what a $.state call names only from a reference no importer can change.
 const IDENTITY_REF = { plugin: 'phoebis-companion', key: 'identity' } as const
-export const IDENTITY = { ...IDENTITY_REF } as const
 const MODEL_REF = { plugin: 'phoebis-companion', key: 'model' } as const
-export const MODEL = { ...MODEL_REF } as const
 // The plugin's store outlives the session the host's state belongs to, so it keeps each client process's pair for a
 // reload under a later session id of that process. An ended process's entry is never read again, so the store keeps
 // the newest alone.
@@ -86,7 +70,6 @@ export type SessionRecord = {
   // not announce it again, since the router's record left and the agent's next report starts it anew.
   routerReleased: Set<string>
   stopped: boolean
-  previousInstance?: string
   // A start refused for a live holder told the person it waits, so the takeover that ends the wait is told once too.
   conflicted?: boolean
   heartbeatAt?: number
@@ -94,7 +77,7 @@ export type SessionRecord = {
 
 export type Queue = {
   reports: Report[]
-  inFlight?: { report: Report; sessionId: string }
+  inFlight?: { report: Report }
   attempt: number
   retryAt?: number
   // The agents whose start the router refused for its agent limit, each with its own retry time and attempt count:
@@ -501,11 +484,6 @@ function matchAfter(sets: CronSets, fromMs: number): number | undefined {
   return undefined
 }
 
-export function nextCronFire(expression: string, fromMs: number): number | undefined {
-  const sets = cronSets(expression)
-  return sets === undefined ? undefined : matchAfter(sets, fromMs)
-}
-
 // The share of the spread the client gives a cron, from the first eight hexadecimal digits of its id.
 function idShare(id: string): number {
   const share = Number.parseInt(id.slice(0, 8), 16) / 4294967296
@@ -667,7 +645,7 @@ function release(agentId: string, now: number): void {
 
 // A live agent the mod meets first in the client's list or the router's answer (one that ran before this load, or one
 // resumed after its release) joins its parent's open set, so the parent stays parked on it until it ends.
-function adopt(agentId: string, parentId: string | undefined, state: AgentRecord['state'], now: number): AgentRecord {
+function adopt(agentId: string, parentId: string | undefined, state: AgentRecord['state'], now: number): void {
   const parent = parentId ?? MAIN
   const agent = freshRecord(agentId, state, parent)
   model.released.delete(agentId)
@@ -675,7 +653,6 @@ function adopt(agentId: string, parentId: string | undefined, state: AgentRecord
   model.agents.set(agentId, agent)
   const owner = model.agents.get(parent)
   if (owner !== undefined) change(owner, () => owner.open.set(agentId, { id: agentId, kind: 'subagent' }), now)
-  return agent
 }
 
 // The agent an event of this loop counts for, once the mod has judged the loop.
@@ -1021,13 +998,10 @@ function restoreModel(saved: SavedModel, sessionRecord: SessionRecord): void {
 
 function heldModelFor(held: unknown, id: string): SavedModel | undefined {
   if (field(held, 'id') !== id || !Array.isArray(field(held, 'agents')) || !Array.isArray(field(held, 'crons')) ||
-    !Array.isArray(field(held, 'released'))) {
+    !Array.isArray(field(held, 'released')) || !Array.isArray(field(held, 'routerReleased'))) {
     return undefined
   }
-  // A load before the set existed saved its work without one, so a missing set reads as empty and a reload right
-  // after the update still restores that work.
-  const routerReleased: unknown = field(held, 'routerReleased')
-  return { ...(held as SavedModel), routerReleased: Array.isArray(routerReleased) ? routerReleased : [] }
+  return held as SavedModel
 }
 
 async function persistModel($: EngineInterface): Promise<void> {
@@ -1102,7 +1076,7 @@ async function pump($: EngineInterface): Promise<void> {
     // request carried from here and cannot throw on a cleared one.
     const config = settings
     const [report] = queue.reports.splice(at, 1) as [Report]
-    queue.inFlight = { report, sessionId: record.id }
+    queue.inFlight = { report }
     const init = request(settings, buildBody(record, report, sentAt))
     let response: HttpResponse | undefined
     try {
@@ -1243,7 +1217,6 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
       $.ui.log(`took over session ${record.id} from a silent instance`)
     }
     record.conflicted = undefined
-    record.previousInstance = undefined
   }
   queue.attempt = 0
   queue.retryAt = undefined
@@ -1272,7 +1245,6 @@ function refusedReport($: EngineInterface, record: SessionRecord, report: Report
       // The router names a holder that ended or went silent, the one a takeover start replaces, so a holder named
       // after a takeover start already went out is the newer one to take over from.
       if (typeof refusal.instance_id === 'string') {
-        record.previousInstance = refusal.instance_id
         queue.reports = collapse(queue.reports, startReport(refusal.instance_id))
         return
       }
