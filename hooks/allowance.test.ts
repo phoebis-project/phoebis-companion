@@ -9,6 +9,7 @@ const KEY = 'k-test'
 const CONFIGURED = { options: { management_url: ROUTER } }
 const T0 = 1_790_000_000_000
 const SAMPLE_TEXT = JSON.stringify(SAMPLE_ALLOWANCE)
+const OTHER_ALLOWANCE = { ...SAMPLE_ALLOWANCE, now: '2026-11-08T12:00:05Z' }
 const PAGE = '<!doctype html><title>Phoebis</title>'
 const TOOL_CALL = 'mcp__phoebis-companion__allowance'
 
@@ -146,6 +147,50 @@ test('a reload whose start GET fails answers the error text, not the earlier bod
   expect(answer.isError).toBe(true)
   expect(answer.content[0]?.text).toContain('connection refused')
 })
+
+test('a start GET that lands after a later start under another URL refilled the cache leaves the later body cached',
+  { options: { keepalive: false } }, async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY], ['ANTHROPIC_BASE_URL', ROUTER]])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    router.answerGet(async () => {
+      await clock.sleep(1_000)
+      return { status: 200, body: SAMPLE_ALLOWANCE }
+    })
+    router.answerGet(() => ({ status: 200, body: OTHER_ALLOWANCE }))
+    const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    variables.set('ANTHROPIC_BASE_URL', 'http://127.0.0.1:2')
+    await start($, clock)
+    await clock.advance(1_000)
+    await first
+    expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
+    expect(router.gets).toHaveLength(2)
+  })
+
+test('a call GET that lands after a later start under another URL refilled the cache leaves the later body cached',
+  { options: { keepalive: false } }, async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY], ['ANTHROPIC_BASE_URL', ROUTER]])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    await start($, clock)
+    await clock.set(T0 + 10_000)
+    router.answerGet(async () => {
+      await clock.sleep(1_000)
+      return { status: 200, body: SAMPLE_ALLOWANCE }
+    })
+    router.answerGet(() => ({ status: 200, body: OTHER_ALLOWANCE }))
+    const pending = call($)
+    await clock.settle()
+    variables.set('ANTHROPIC_BASE_URL', 'http://127.0.0.1:2')
+    await start($, clock)
+    await clock.advance(1_000)
+    await pending
+    expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
+    expect(router.gets).toHaveLength(3)
+  })
 
 test('a start GET past the limit registers the tool and the session start is not held longer', CONFIGURED,
   async ($, on) => {

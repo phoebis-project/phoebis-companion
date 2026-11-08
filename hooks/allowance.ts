@@ -55,6 +55,9 @@ const NOT_PERMITTED = `${PREFIX}this key may not read the allowance`
 
 // The entry names its session, since a /clear starts a new session id with no session.start to clear the cache.
 let cache: { at: number; sessionId: string; text: string } | undefined
+// An earlier start's GET can land after a later start refilled the cache, so a writer caches its body only while no
+// start has begun since its GET went out.
+let generation = 0
 
 /** True for a text that parses as a JSON object with `protocol: 1`, which is what the allowance route answers. */
 function isAllowance(text: string): boolean {
@@ -119,10 +122,11 @@ export function errorAnswer(text: string): ToolAnswer {
 export async function answerCall($: EngineInterface, settings: Settings, sessionId: string, now: number):
   Promise<ToolAnswer> {
   if (cache !== undefined && cache.sessionId === sessionId && now - cache.at < CACHE_MS) return answer(cache.text)
+  const sent = generation
   const fetched = await fetchWithin($, settings, sessionId)
   const body = allowanceOf(fetched)
   if (body === undefined) return errorAnswer(unreachable(fetched, settings))
-  cache = { at: now, sessionId, text: body }
+  if (sent === generation) cache = { at: now, sessionId, text: body }
   return answer(body)
 }
 
@@ -152,12 +156,14 @@ async function registerTool($: EngineInterface, client: string): Promise<void> {
 export async function startCheck($: EngineInterface, settings: Settings, sessionId: string, client: string,
   notifications: boolean): Promise<StartOutcome> {
   // A reload under a changed URL or key must never answer the earlier configuration's body.
+  generation += 1
+  const sent = generation
   cache = undefined
   const now = await $.clock.now()
   const fetched = await fetchWithin($, settings, sessionId)
   const body = allowanceOf(fetched)
   const outcome = outcomeOf(fetched, body)
-  if (body !== undefined) cache = { at: now, sessionId, text: body }
+  if (body !== undefined && sent === generation) cache = { at: now, sessionId, text: body }
   if (outcome === 'not_permitted') $.ui.log(NOT_PERMITTED, { to: 'debug' })
   if (outcome === 'refused' || outcome === 'unreachable') {
     const line = outcome === 'refused'
