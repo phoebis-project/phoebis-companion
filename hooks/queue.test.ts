@@ -785,7 +785,8 @@ test('a start under a new id never registers the old id a pump finds first', CON
   // The refusal leaves the end nothing to report, so the record under session-a is never marked ended.
   await end($, clock, 'other', 'session-a')
   router.setId('session-b')
-  // The new id's read of the held work answers a second late, and a tool call pumps meanwhile.
+  // The new id's read of the held work answers a second late, and a tool call lands meanwhile, which would pump under
+  // a lifted refusal.
   router.delayModel(1000)
   const starting = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
   await clock.settle()
@@ -797,6 +798,23 @@ test('a start under a new id never registers the old id a pump finds first', CON
     ['session_start', 'session-b'],
   ])
 })
+
+test('a start superseded while it waits never revives the session that ended meanwhile', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    // The first start's read of the held work answers a second late, and a second start overtakes it.
+    router.delayModel(1000)
+    const superseded = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    await start($, clock)
+    await end($, clock, 'other', 'session-a')
+    await clock.advance(1000)
+    await superseded
+    // A tool call pumps whatever the record holds once the late read has landed.
+    await $.tool.call({ tool: 'Read', tool_use_id: 'toolu_1' } as Parameters<Engine['tool']['call']>[0])
+    await clock.settle()
+    expect(events(router)).toEqual(['session_start', 'session_end'])
+  })
 
 describe('the request is a POST of protocol 1 to the events path with a JSON content type', () => {
   const urls = [

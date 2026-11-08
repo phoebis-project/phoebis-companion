@@ -605,11 +605,12 @@ async function persistModel($: EngineInterface): Promise<void> {
   await $.state.set(MODEL_REF, value)
 }
 
-async function ensureSession($: EngineInterface, revive: boolean): Promise<void> {
+async function ensureSession($: EngineInterface, revive: () => boolean): Promise<void> {
   const id = await $.session.id()
   // A record that ended under the current id is a conversation resumed after its end, which the router closed with
-  // the session_end. Only a prompt or a start shows the resume, so a tick leaves the record ended.
-  const kept = (): boolean => session?.id === id && !(revive && session.stopped)
+  // the session_end. Only a prompt or a current start shows the resume, so a tick leaves the record ended. The
+  // question is asked at each decision, since a start can lose its currency while it waits.
+  const kept = (): boolean => session?.id === id && !(session.stopped && revive())
   if (kept() || identity === undefined) return
   // The same id in the same process is a reload of the module or a resume after its end, and the host still holds
   // its tracked work. A new id is a new conversation, so nothing the old one had open or scheduled carries over. Read
@@ -925,7 +926,7 @@ function tick($: EngineInterface): void {
   void (async () => {
     try {
       if (!active()) return
-      await ensureSession($, false)
+      await ensureSession($, () => false)
       // A failed reconcile must not cost the lease, so the heartbeat goes out either way.
       if (live()) await reconcile($).catch(() => undefined)
       // A heartbeat renews a lease the router granted, so a session still waiting for its registration sends none.
@@ -1037,7 +1038,7 @@ export async function startKeepalive($: EngineInterface, resolved: Settings, isC
     $.env.get('BASH_MAX_TIMEOUT_MS'),
   ])
   model.env = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
-  await ensureSession($, true)
+  await ensureSession($, isCurrent)
   // A later session start can land during these awaits, and the settings it set or cleared must stand.
   if (!isCurrent()) return
   // One step with no await, so no report goes out under these settings ahead of the registration. Its acknowledgment
@@ -1057,7 +1058,7 @@ export function clearSettings(): void {
 export function installKeepalive(on: On): void {
   on('prompt.submit', async ($, e, next) => {
     if (active()) {
-      await ensureSession($, true)
+      await ensureSession($, () => true)
       if (live()) {
         if (e.origin.kind === 'scheduled-trigger') {
           fired(await $.clock.now())
