@@ -568,6 +568,21 @@ test('a return to an earlier id registers past the last sequence the router took
     expect(nth(router.requests, 6).sequence).toBeGreaterThan(nth(router.requests, 3).sequence)
   })
 
+test('a session resumed under its original id after its end registers again', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  await prompt($, clock)
+  await end($, clock, 'resume', 'session-a')
+  expect(events(router)).toEqual(['session_start', 'activity', 'session_end'])
+  // A fresh record's first sequence is the clock's, so the resume comes after the millisecond the end took.
+  await clock.advance(1000)
+  await prompt($, clock)
+  expect(router.requests.slice(3).map((body) => [body.event, body.session_id])).toEqual([
+    ['session_start', 'session-a'],
+    ['activity', 'session-a'],
+  ])
+})
+
 test('a registration refused twice in a row with the same code waits the backoff before it is sent again',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
@@ -732,6 +747,25 @@ describe('a key the router refuses stops the mod for the process with one debug 
     })
   }
 })
+
+test('a start whose check registers the tool after a refused key resumes under the corrected key', CONFIGURED,
+  async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'K1']])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    router.answer(() => ({ status: 401 }))
+    await start($, clock)
+    await prompt($, clock)
+    await clock.advance(30000)
+    expect(events(router)).toEqual(['session_start'])
+    // The fake answers the start's GET 200 by default, so the check registers the tool under the new key.
+    variables.set('ANTHROPIC_AUTH_TOKEN', 'K2')
+    await start($, clock)
+    await clock.advance(25000)
+    expect(events(router).slice(1)).toEqual(['session_start', 'heartbeat'])
+    expect(router.headers.slice(1).map((headers) => headers.Authorization)).toEqual(['Bearer K2', 'Bearer K2'])
+  })
 
 describe('the request is a POST of protocol 1 to the events path with a JSON content type', () => {
   const urls = [

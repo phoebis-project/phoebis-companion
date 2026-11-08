@@ -487,8 +487,8 @@ test('a valid key at a later start under the same session id sends nothing queue
     await clock.advance(2_000)
     await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
     await clock.settle()
-    expect(router.requests.slice(2).map((body) => body.event)).toEqual(['activity'])
-    expect(router.headers.slice(2).map((headers) => headers.Authorization)).toEqual(['Bearer k-c'])
+    expect(router.requests.slice(2).map((body) => body.event)).toEqual(['session_start', 'activity'])
+    expect(router.headers.slice(2).map((headers) => headers.Authorization)).toEqual(['Bearer k-c', 'Bearer k-c'])
   })
 
 test('a valid key at a later start under the same session id sends nothing queued before a start with no key',
@@ -511,8 +511,8 @@ test('a valid key at a later start under the same session id sends nothing queue
     await clock.advance(2_000)
     await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
     await clock.settle()
-    expect(router.requests.slice(2).map((body) => body.event)).toEqual(['activity'])
-    expect(router.headers.slice(2).map((headers) => headers.Authorization)).toEqual(['Bearer k-c'])
+    expect(router.requests.slice(2).map((body) => body.event)).toEqual(['session_start', 'activity'])
+    expect(router.headers.slice(2).map((headers) => headers.Authorization)).toEqual(['Bearer k-c', 'Bearer k-c'])
   })
 
 test('a session start that fails leaves the tool unconfigured and the next prompt sends nothing', CONFIGURED,

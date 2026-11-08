@@ -106,8 +106,8 @@ const queue: Queue = { reports: [], attempt: 0, deferred: new Map() }
 let timer: Timer | undefined
 // The tracked work as the host last took it, so a pump writes it only when it changed.
 let savedModel: string | undefined
-// A key the router refused is refused for every session of the process, and retrying it would only fill the
-// router's log.
+// A key the router refused is refused for every session of the process until a later start's check passes, since
+// retrying it would only fill the router's log.
 let refused = false
 // The reports already sent again under a generation the router named, so a second refusal drops them.
 const resent = new WeakSet<Report>()
@@ -605,14 +605,17 @@ async function persistModel($: EngineInterface): Promise<void> {
   await $.state.set(MODEL_REF, value)
 }
 
-async function ensureSession($: EngineInterface): Promise<void> {
+async function ensureSession($: EngineInterface, revive: boolean): Promise<void> {
   const id = await $.session.id()
-  if (session?.id === id || identity === undefined) return
+  // A record that ended under the current id is a conversation resumed after its end, which the router closed with
+  // the session_end. Only a prompt or a start shows the resume, so a tick leaves the record ended.
+  const kept = (): boolean => session?.id === id && !(revive && session.stopped)
+  if (kept() || identity === undefined) return
   // The same id in the same process is a reload of the module, whose tracked work the host still holds. A new id
   // is a new conversation, so nothing the old one had open or scheduled carries over. Read before the session
   // moves, so a pump during the read never writes the old session's work under the new id.
   const held = heldModelFor((await $.state.get(MODEL_REF)).value, id)
-  if (session?.id === id) return
+  if (kept()) return
   session = {
     id,
     instance: identity.instance,
@@ -922,7 +925,7 @@ function tick($: EngineInterface): void {
   void (async () => {
     try {
       if (!active()) return
-      await ensureSession($)
+      await ensureSession($, false)
       // A failed reconcile must not cost the lease, so the heartbeat goes out either way.
       if (live()) await reconcile($).catch(() => undefined)
       // A heartbeat renews a lease the router granted, so a session still waiting for its registration sends none.
@@ -1025,19 +1028,24 @@ async function fence($: EngineInterface): Promise<Identity> {
  */
 export async function startKeepalive($: EngineInterface, resolved: Settings, isCurrent: () => boolean):
   Promise<void> {
-  if (!refused) identity = await fence($)
+  // The refusal holds until the fence is done: cleared before its await, it would let a report go out under the
+  // refused key, whose 401 sets the refusal again.
+  identity = await fence($)
   // A later session start can land while the fence awaits, and the settings it set or cleared must stand.
   if (!isCurrent()) return
+  // One step with no await, so no report goes out under these settings ahead of the registration. Its acknowledgment
+  // is what schedules the heartbeat, so the session registers again whatever ended the previous settings, and a
+  // registered session's repeat is idempotent on the router.
   settings = resolved
-  if (active()) {
-    const [defaultMs, maxMs] = await Promise.all([
-      $.env.get('BASH_DEFAULT_TIMEOUT_MS'),
-      $.env.get('BASH_MAX_TIMEOUT_MS'),
-    ])
-    model.env = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
-    await ensureSession($)
-    void pump($)
-  }
+  refused = false
+  reregister()
+  const [defaultMs, maxMs] = await Promise.all([
+    $.env.get('BASH_DEFAULT_TIMEOUT_MS'),
+    $.env.get('BASH_MAX_TIMEOUT_MS'),
+  ])
+  model.env = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
+  await ensureSession($, true)
+  void pump($)
 }
 
 /** Drops the held settings, so the lifecycle reports nothing until a later start resolves them again. */
@@ -1048,7 +1056,7 @@ export function clearSettings(): void {
 export function installKeepalive(on: On): void {
   on('prompt.submit', async ($, e, next) => {
     if (active()) {
-      await ensureSession($)
+      await ensureSession($, true)
       if (live()) {
         if (e.origin.kind === 'scheduled-trigger') {
           fired(await $.clock.now())
@@ -1166,6 +1174,9 @@ export function installKeepalive(on: On): void {
   // The end goes out past a request in flight: every session.end hook shares one short budget, and the lease
   // covers whatever this one request does not reach.
   on('session.end', async ($, e, next) => {
+    // No tick follows the end: the conversation that resumes or replaces this one registers at its first prompt or
+    // start, and that registration's acknowledgment schedules the timer again.
+    timer?.cancel()
     const held = reporting()
     if (held !== undefined) {
       const { config, record } = held
