@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 170" role="img" aria-label="Phoebis Companion">
+  <title>Phoebis Companion</title>
+
+  <!-- Editable master; the wordmark needs Audiowide installed (SIL Open Font License, fonts.google.com/specimen/Audiowide)
+       and the tagline DejaVu Sans. Regenerate the self-contained copy the README uses:
+       rsvg-convert -f svg logo-dark.svg -o ../logo-dark.svg -->
+  <!-- The family's Pixel butterfly, reduced, above and right of a pixel prompt: the companion lives in the session -->
+  <g transform="translate(107.75 16) scale(0.65)">
+    <rect x="54" y="6" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="102" y="6" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="66" y="18" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="90" y="18" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="42" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="54" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="78" y="30" width="10" height="10" rx="2.5" fill="#FFD23F"/>
+    <rect x="102" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="114" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="42" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="54" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="66" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="78" y="42" width="10" height="10" rx="2.5" fill="#FFD23F"/>
+    <rect x="90" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="102" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="114" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="42" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="54" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="66" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="78" y="54" width="10" height="10" rx="2.5" fill="#FFD23F"/>
+    <rect x="90" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="102" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="114" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="54" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="66" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="78" y="66" width="10" height="10" rx="2.5" fill="#FFD23F"/>
+    <rect x="90" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="102" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="66" y="78" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="78" y="78" width="10" height="10" rx="2.5" fill="#FFD23F"/>
+    <rect x="90" y="78" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="6" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="18" y="78" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="6" y="90" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
+    <rect x="30" y="96" width="10" height="4" rx="2" fill="#FFD23F"/>
+  </g>
+
+  <text x="150" y="122" text-anchor="middle" font-family="Audiowide" font-size="24" fill="#F2F3F5">Phoebis Companion</text>
+  <text x="150" y="146" text-anchor="middle" font-family="DejaVu Sans" font-size="12" letter-spacing="0.3" fill="#A3A9B5">Every session reports back.</text>
+</svg>
