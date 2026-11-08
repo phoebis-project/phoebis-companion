@@ -334,6 +334,34 @@ test('a start that set current last and then throws in its fence leaves no confi
   expect(router.gets).toHaveLength(2)
 })
 
+test('a start that resolves no key after a later start began leaves the later configuration standing', CONFIGURED,
+  async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    let keyReads = 0
+    // The first start's key read answers no key a second late, after the second start has run to the end.
+    on('env.get', async (_$, e) => {
+      if (e.name !== 'ANTHROPIC_AUTH_TOKEN') return { value: undefined }
+      keyReads += 1
+      if (keyReads === 1) {
+        await clock.sleep(1_000)
+        return { value: undefined }
+      }
+      return { value: 'k-b' }
+    })
+    const router = fakeRouter(on, clock)
+    router.answerGet(() => ({ status: 200, body: OTHER_ALLOWANCE }))
+    const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    await start($, clock)
+    await clock.advance(1_000)
+    await first
+    await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'activity'])
+    expect(router.headers.map((headers) => headers.Authorization)).toEqual(['Bearer k-b', 'Bearer k-b'])
+    expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
+  })
+
 test('a call whose session id read a later start overtook reads under the later start\'s URL',
   { options: { keepalive: false } }, async ($, on) => {
     const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY], ['ANTHROPIC_BASE_URL', ROUTER]])

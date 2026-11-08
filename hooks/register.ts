@@ -84,6 +84,8 @@ export const register: Register = (on, options) => {
         oauthToken,
       })
       if ('missing' in resolution) {
+        // A later start that began during the reads above owns the configuration, so this one leaves it.
+        if (start !== starts) return next(e)
         const line = 'problem' in resolution
           ? `${MISSING[resolution.missing]} (${resolution.problem})`
           : MISSING[resolution.missing]
