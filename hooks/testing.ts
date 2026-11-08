@@ -5,6 +5,7 @@ import type {
   ConfigValue,
   HttpResponse,
   On,
+  PromptEditResult,
   RegisteredToolSpec,
   SessionVersion,
 } from 'claude-code'
@@ -123,10 +124,17 @@ export type FakeRouter = {
   answerTool: (fn: (e: { tool: string }) => unknown) => void
   /** Scripts the next `agent.spawn`'s answer the same way, with the id the client gives the agent. */
   answerSpawn: (fn: () => { agentId: string } | Promise<{ agentId: string }>) => void
+  /**
+   * Scripts what the next `prompt.edit` resolves to beneath the mod, and several calls answer the next edits in turn.
+   * A function that throws stands for a lower hook that rejects the edit.
+   */
+  answerEdit: (fn: () => PromptEditResult) => void
   /** Holds the next `$.agent.list()` for this long on the clock before it answers. */
   delayList: (ms: number) => void
   /** Holds the next `$.state.get` of the plugin's tracked work for this long on the clock before it answers. */
   delayModel: (ms: number) => void
+  /** Denies the next `$.tool.register` with the reason, as an engine that refuses the spec does. */
+  denyRegister: (reason: string) => void
 }
 
 type Replayed = { tool?: unknown; spawn?: { model?: string; agentId?: string } }
@@ -232,6 +240,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const getAnswers: GetAnswer[] = []
   const tools: ((e: { tool: string }) => unknown)[] = []
   const spawns: (() => { agentId: string } | Promise<{ agentId: string }>)[] = []
+  const edits: (() => PromptEditResult)[] = []
+  const registerDenials: string[] = []
   let listDelayMs = 0
   let modelDelayMs = 0
   // The agents the router holds per session, each with its generation.
@@ -292,11 +302,17 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     answerSpawn: (fn) => {
       spawns.push(fn)
     },
+    answerEdit: (fn) => {
+      edits.push(fn)
+    },
     delayList: (ms) => {
       listDelayMs = ms
     },
     delayModel: (ms) => {
       modelDelayMs = ms
+    },
+    denyRegister: (reason) => {
+      registerDenials.push(reason)
     },
   }
   const slots: Replayed = {}
@@ -454,6 +470,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   })
   on('tool.register', (_$, e) => {
     router.reached.push('tool.register')
+    const denial = registerDenials.shift()
+    if (denial !== undefined) return { deny: denial }
     router.tools.push(e)
     return { value: { tool: `mcp__phoebis-companion__${e.name}` } }
   })
@@ -470,7 +488,10 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   // The engine's own answers: what each event's bottom resolves to when nothing beneath the plugins rewrites it.
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('prompt.submit', (_$, e) => ({ text: e.text, context: e.context }))
-  on('prompt.edit', (_$, e) => ({ text: e.text, cursor: e.cursor }))
+  on('prompt.edit', (_$, e) => {
+    const scripted = edits.shift()
+    return scripted === undefined ? { text: e.text, cursor: e.cursor } : scripted()
+  })
   on('turn.step', async function* (_$, e) {
     yield { kind: 'stop', stopReason: 'end_turn', usage: null }
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }

@@ -74,6 +74,17 @@ test('a 403 companion_not_permitted registers no tool and writes a debug line on
   expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
 })
 
+test('a 403 with another code registers the tool and writes the transcript line naming 403', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    // The route answers no other 403, so this one comes from something in front of the router.
+    router.answerGet(() => ({ status: 403, body: { code: 'forbidden' } }))
+    await start($, clock)
+    expect(router.tools).toHaveLength(1)
+    expect(router.logs.map((line) => line.to)).toEqual(['transcript'])
+    expect(router.logs[0]?.text).toContain('(403)')
+  })
+
 test('a 200 registers the tool once and a second call inside ten seconds answers the cached body with no second GET',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
@@ -108,6 +119,40 @@ test('a start GET that fails registers the tool and a call answers the redacted 
     for (const text of [JSON.stringify(router.logs), JSON.stringify(router.toasts), JSON.stringify(answer)]) {
       expect(text).not.toContain(sentinel)
     }
+  })
+
+test('a credential in ANTHROPIC_BASE_URL reaches no transcript line, toast or tool answer after a failed start GET',
+  async ($, on) => {
+    mock.env(on, { ANTHROPIC_AUTH_TOKEN: KEY, ANTHROPIC_BASE_URL: 'http://user:pw@127.0.0.1:1' })
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    router.answerGet(() => ({ fail: 'connection refused' }))
+    router.answerGet(() => ({ fail: 'connection refused' }))
+    await start($, clock)
+    const answer = await call($)
+    expect(router.logs).toHaveLength(1)
+    expect(router.logs[0]?.text).toContain('http://<redacted>@127.0.0.1:1')
+    expect(router.logs[0]?.text).not.toContain('pw')
+    expect(router.toasts).toHaveLength(1)
+    expect(router.toasts[0]).toContain('http://<redacted>@127.0.0.1:1')
+    expect(router.toasts[0]).not.toContain('pw')
+    expect(answer.content[0]?.text).toContain('http://<redacted>@127.0.0.1:1')
+    expect(answer.content[0]?.text).not.toContain('pw')
+  })
+
+test('a credential in ANTHROPIC_BASE_URL reaches no transcript line or toast when the router refuses the key',
+  async ($, on) => {
+    mock.env(on, { ANTHROPIC_AUTH_TOKEN: KEY, ANTHROPIC_BASE_URL: 'http://user:pw@127.0.0.1:1' })
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    router.answerGet(() => ({ status: 401 }))
+    await start($, clock)
+    expect(router.logs).toHaveLength(1)
+    expect(router.logs[0]?.text).toContain('http://<redacted>@127.0.0.1:1')
+    expect(router.logs[0]?.text).not.toContain('pw')
+    expect(router.toasts).toHaveLength(1)
+    expect(router.toasts[0]).toContain('http://<redacted>@127.0.0.1:1')
+    expect(router.toasts[0]).not.toContain('pw')
   })
 
 test('a 200 that is not the allowance registers the tool and a call answers the error text', CONFIGURED,
@@ -247,6 +292,16 @@ test('a second session start registers the tool again under the same name', CONF
   await start($, clock)
   expect(router.tools.map((tool) => tool.name)).toEqual(['allowance', 'allowance'])
 })
+
+test('a registration the engine rejects costs the tool alone, with one debug line, and the keepalive still starts',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    router.denyRegister('tool limit reached')
+    await start($, clock)
+    expect(router.logs.map((line) => line.to)).toEqual(['debug'])
+    expect(router.logs[0]?.text).toContain('tool limit reached')
+    expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
+  })
 
 test('a start that resolves no key leaves the tool answering an error, not the earlier configuration\'s body',
   CONFIGURED, async ($, on) => {

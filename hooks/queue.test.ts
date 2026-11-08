@@ -281,6 +281,22 @@ test('a hook event before the retry deadline enqueues and sends nothing', CONFIG
   expect(router.times).toEqual([T0, T0 + 1000, T0 + 1000])
 })
 
+test('an edit whose lower hook rejects still queues the presence', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  router.answerEdit(() => {
+    throw new Error('beneath')
+  })
+  // The test's `$` declares no `prompt.edit`, but the kit raises it as the engine does. The kit rejects this edit with
+  // its own error whether the mod passes the rejection on or swallows it, so the test asserts no rejection.
+  const prompt = ($ as unknown as { prompt: { edit: (e: unknown) => Promise<unknown> } }).prompt
+  await prompt.edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'a' })
+    .catch(() => undefined)
+  await clock.settle()
+  expect(events(router)).toEqual(['session_start', 'activity'])
+  expect(router.requests[1]).toMatchObject({ agent_id: 'main', kind: 'presence' })
+})
+
 test('redactSecrets takes the configured key and a URL\'s userinfo out of a message and leaves the rest', () => {
   expect(redactSecrets(`fetch to http://user:${KEY}@127.0.0.1:1/v0/keepalive/events failed with bearer ${KEY}`, KEY))
     .toBe('fetch to http://<redacted>@127.0.0.1:1/v0/keepalive/events failed with bearer <key>')
