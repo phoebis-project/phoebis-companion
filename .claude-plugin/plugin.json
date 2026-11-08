@@ -1,0 +1,18 @@
+{
+  "name": "phoebis-companion",
+  "version": "0.1.0",
+  "description": "Reports session liveness to Phoebis Router and gives the model the pool's allowance",
+  "author": {"name": "Florian Bernd"},
+  "keywords": ["allowance", "cache", "keepalive", "lifecycle"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "management_url": { "type": "string", "title": "Management URL", "default": "",
+      "description": "Where to report and to read. Empty uses ANTHROPIC_BASE_URL. A path prefix is kept." },
+    "token": { "type": "string", "title": "Router key", "default": "", "sensitive": true,
+      "description": "Empty uses the client's own token variable. A key set here needs the Management URL." },
+    "keepalive": { "type": "boolean", "title": "Cache warming reports", "default": true,
+      "description": "Report this session's liveness so the router keeps its caches warm." },
+    "notifications": { "type": "boolean", "title": "Start check toasts", "default": true,
+      "description": "Raise a toast beside each transcript line of the start check." }
+  }
+}
