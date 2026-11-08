@@ -1391,13 +1391,17 @@ export function installKeepalive(on: On): void {
   on('prompt.edit', async ($, e, next) => {
     if (!live()) return next(e)
     const main = mainAgent()
-    const [r, now] = await Promise.all([next(e), $.clock.now()])
+    // The edit runs beneath while the clock is read. The handler only keeps a rejection from going unhandled meanwhile:
+    // the returned promise still carries it, and the presence is queued either way.
+    const pending = next(e)
+    pending.catch(() => undefined)
+    const now = await $.clock.now()
     if (now - main.lastPresence >= PRESENCE_THROTTLE_MS) {
       main.lastPresence = now
       queue.reports = collapse(queue.reports, { event: 'activity', agent_id: MAIN, kind: 'presence' })
     }
     void pump($)
-    return r
+    return pending
   }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
