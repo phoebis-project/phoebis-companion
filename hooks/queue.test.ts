@@ -810,7 +810,7 @@ test('a start superseded while it waits never revives the session that ended mea
     await end($, clock, 'other', 'session-a')
     await clock.advance(1000)
     await superseded
-    // A tool call pumps whatever the record holds once the late read has landed.
+    // A tool call lands once the late read has, which would pump a revived record.
     await $.tool.call({ tool: 'Read', tool_use_id: 'toolu_1' } as Parameters<Engine['tool']['call']>[0])
     await clock.settle()
     expect(events(router)).toEqual(['session_start', 'session_end'])
