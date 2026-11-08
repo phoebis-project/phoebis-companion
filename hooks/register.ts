@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 import { answerCall, errorAnswer, retireStarts, startCheck, TOOL_CALL } from './allowance.ts'
 import { clearSettings, emptyQueue, installKeepalive, MINIMUM_VERSION, startKeepalive } from './keepalive.ts'
-import { optionsOf, PREFIX, redactSecrets, resolveSettings, urlProblem, versionAtLeast } from './settings.ts'
+import { errorText, optionsOf, PREFIX, redactSecrets, resolveSettings, urlProblem, versionAtLeast } from './settings.ts'
 import type { Resolution, Settings } from './settings.ts'
 
 const MISSING: Record<Extract<Resolution, { missing: unknown }>['missing'], string> = {
@@ -13,6 +13,9 @@ const MISSING: Record<Extract<Resolution, { missing: unknown }>['missing'], stri
 
 const UNCONFIGURED = 'the allowance is unknown: this session\'s last start left no usable router configuration ' +
   '(settings missing or unusable, key refused or start failed)'
+
+// Counts the session starts, so a start that throws clears the configuration only while no later start has begun.
+let starts = 0
 
 export const register: Register = (on, options) => {
   // The URL and key the last session.start resolved, which the tool reads under. A registered tool outlives a start
@@ -58,52 +61,58 @@ export const register: Register = (on, options) => {
     next(typeof e.value === 'string' ? { ...e, value: e.value.trim() } : e))
 
   on('session.start', async ($, e, next) => {
-    const { version, base } = await $.session.version()
-    const client = base ?? version
-    if (!versionAtLeast(client, MINIMUM_VERSION)) return next(e)
-    const [baseUrl, authToken, apiKey, oauthToken] = await Promise.all([
-      $.env.get('ANTHROPIC_BASE_URL'),
-      $.env.get('ANTHROPIC_AUTH_TOKEN'),
-      $.env.get('ANTHROPIC_API_KEY'),
-      $.env.get('CLAUDE_CODE_OAUTH_TOKEN'),
-    ])
-    const resolution = resolveSettings({
-      managementUrl: config.managementUrl,
-      token: config.token,
-      baseUrl,
-      authToken,
-      apiKey,
-      oauthToken,
-    })
-    if ('missing' in resolution) {
-      const line = 'problem' in resolution
-        ? `${MISSING[resolution.missing]} (${resolution.problem})`
-        : MISSING[resolution.missing]
-      deactivate()
-      $.ui.log(line)
-      if (config.notifications) $.ui.toast(line)
+    starts += 1
+    const start = starts
+    // Each `return next(e)` below hands back its promise unawaited, so a rejection beneath never reaches this catch.
+    try {
+      const { version, base } = await $.session.version()
+      const client = base ?? version
+      if (!versionAtLeast(client, MINIMUM_VERSION)) return next(e)
+      const [baseUrl, authToken, apiKey, oauthToken] = await Promise.all([
+        $.env.get('ANTHROPIC_BASE_URL'),
+        $.env.get('ANTHROPIC_AUTH_TOKEN'),
+        $.env.get('ANTHROPIC_API_KEY'),
+        $.env.get('CLAUDE_CODE_OAUTH_TOKEN'),
+      ])
+      const resolution = resolveSettings({
+        managementUrl: config.managementUrl,
+        token: config.token,
+        baseUrl,
+        authToken,
+        apiKey,
+        oauthToken,
+      })
+      if ('missing' in resolution) {
+        const line = 'problem' in resolution
+          ? `${MISSING[resolution.missing]} (${resolution.problem})`
+          : MISSING[resolution.missing]
+        deactivate()
+        $.ui.log(line)
+        if (config.notifications) $.ui.toast(line)
+        return next(e)
+      }
+      const sessionId = await $.session.id()
+      // No await falls between setting current and startCheck's generation step, so the start that set current last
+      // is the one whose check is not stale.
+      current = resolution.settings
+      const outcome = await startCheck($, resolution.settings, sessionId, client, config.notifications)
+      // A later start that set or cleared current during the check owns the configuration, so this one leaves it.
+      if (outcome === 'stale' || current !== resolution.settings) return next(e)
+      if (outcome === 'refused') {
+        deactivate()
+      } else if (config.keepalive) {
+        await startKeepalive($, resolution.settings, () => current === resolution.settings)
+      }
+      return next(e)
+    } catch (error) {
+      // A later start may already hold the configuration, and an earlier start's failure must not clear it.
+      if (start === starts) {
+        const key = current?.key ?? ''
+        deactivate()
+        const line = `${PREFIX}the session start hook failed (${errorText(error)}), so this session reports nothing`
+        $.ui.log(redactSecrets(line, key), { to: 'debug' })
+      }
       return next(e)
     }
-    const sessionId = await $.session.id()
-    // No await falls between setting current and startCheck's generation step, so the start that set current last is
-    // the one whose check is not stale.
-    current = resolution.settings
-    const outcome = await startCheck($, resolution.settings, sessionId, client, config.notifications)
-    // A later start that set or cleared current during the check owns the configuration, so this one leaves it alone.
-    if (outcome === 'stale' || current !== resolution.settings) return next(e)
-    if (outcome === 'refused') {
-      deactivate()
-    } else if (config.keepalive) {
-      await startKeepalive($, resolution.settings, () => current === resolution.settings)
-    }
-    return next(e)
-  }).catch(($, e, next) => {
-    const key = current?.key ?? ''
-    deactivate()
-    const reason = next.error.message ?? next.error.kind
-    $.ui.log(redactSecrets(`${PREFIX}the session start hook failed (${reason}), so this session reports nothing`, key),
-      { to: 'debug' })
-    // A failure inside the mod never changes the event.
-    return next(e)
-  })
+  }).catch(($, e, next) => next(e)) // A failure inside the mod never changes the event.
 }
