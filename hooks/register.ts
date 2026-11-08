@@ -11,11 +11,12 @@ const MISSING: Record<Extract<Resolution, { missing: unknown }>['missing'], stri
   token_without_url: `${PREFIX}the token setting needs the Management URL, so this session reports nothing`,
 }
 
-const UNCONFIGURED = 'no router URL or key resolved at this session start, so the allowance is unknown'
+const UNCONFIGURED = 'the allowance is unknown: this session\'s last start left no usable router configuration ' +
+  '(settings missing or unusable, key refused or start failed)'
 
 export const register: Register = (on, options) => {
   // The URL and key the last session.start resolved, which the tool reads under. A registered tool outlives a start
-  // that resolves nothing, so a call after one answers an error rather than the earlier configuration's router.
+  // that leaves no configuration, so a call after one answers an error rather than the earlier configuration's router.
   let current: Settings | undefined
   // The options hold for the activation: a change reloads the plugin and runs register again.
   const config = optionsOf(options)
