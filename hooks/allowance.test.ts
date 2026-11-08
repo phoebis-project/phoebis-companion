@@ -304,6 +304,36 @@ test('a start whose lifecycle fence throws after a later start took over leaves 
     expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
   })
 
+test('a start that set current last and then throws in its fence leaves no configuration behind', async ($, on) => {
+  const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'k-a'], ['ANTHROPIC_BASE_URL', ROUTER]])
+  const clock = mock.clock(on, { now: T0 })
+  let fenceReads = 0
+  // The second start's fence reads first, so the second fence read is the first start's, and it fails.
+  on('env.get', (_$, e) => {
+    if (e.name === 'ANTHROPIC_CUSTOM_HEADERS') {
+      fenceReads += 1
+      if (fenceReads === 2) return { deny: 'the environment could not be read' }
+    }
+    return { value: variables.get(e.name) }
+  })
+  const router = fakeRouter(on, clock)
+  router.delayId(1_000)
+  router.answerGet(() => ({ status: 200, body: OTHER_ALLOWANCE }))
+  const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  variables.set('ANTHROPIC_AUTH_TOKEN', 'k-b')
+  variables.set('ANTHROPIC_BASE_URL', 'http://127.0.0.1:2')
+  await start($, clock)
+  await clock.advance(1_000)
+  await first
+  await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+  await clock.settle()
+  const answer = await call($)
+  expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
+  expect(answer.isError).toBe(true)
+  expect(router.gets).toHaveLength(2)
+})
+
 test('a call whose session id read a later start overtook reads under the later start\'s URL',
   { options: { keepalive: false } }, async ($, on) => {
     const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY], ['ANTHROPIC_BASE_URL', ROUTER]])

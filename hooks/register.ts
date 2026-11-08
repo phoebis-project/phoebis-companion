@@ -14,7 +14,7 @@ const MISSING: Record<Extract<Resolution, { missing: unknown }>['missing'], stri
 const UNCONFIGURED = 'the allowance is unknown: this session\'s last start left no usable router configuration ' +
   '(settings missing or unusable, key refused or start failed)'
 
-// Counts the session starts, so a start that throws clears the configuration only while no later start has begun.
+// Counts the session starts, so a start that throws can tell whether a later start has begun since.
 let starts = 0
 
 export const register: Register = (on, options) => {
@@ -63,6 +63,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     starts += 1
     const start = starts
+    let resolved: Settings | undefined
     // Each `return next(e)` below hands back its promise unawaited, so a rejection beneath never reaches this catch.
     try {
       const { version, base } = await $.session.version()
@@ -91,6 +92,7 @@ export const register: Register = (on, options) => {
         if (config.notifications) $.ui.toast(line)
         return next(e)
       }
+      resolved = resolution.settings
       const sessionId = await $.session.id()
       // No await falls between setting current and startCheck's generation step, so the start that set current last
       // is the one whose check is not stale.
@@ -105,8 +107,9 @@ export const register: Register = (on, options) => {
       }
       return next(e)
     } catch (error) {
-      // A later start may already hold the configuration, and an earlier start's failure must not clear it.
-      if (start === starts) {
+      // A later start may already hold the configuration, and an earlier start's failure must not clear it. A start
+      // whose settings are still current owns the configuration even when a later start began after it.
+      if (start === starts || (resolved !== undefined && current === resolved)) {
         const key = current?.key ?? ''
         deactivate()
         const line = `${PREFIX}the session start hook failed (${errorText(error)}), so this session reports nothing`
