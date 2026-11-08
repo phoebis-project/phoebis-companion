@@ -7,7 +7,7 @@ import runB from './fixtures/run-b.ts'
 import runC from './fixtures/run-c.ts'
 import runE from './fixtures/run-e.ts'
 import runH from './fixtures/run-h.ts'
-import { commandDeadline, isRealPrompt, nextFireAt, parkOf, PRESENCE_THROTTLE_MS } from './rules.ts'
+import { commandDeadline, isRealPrompt, nextFireAt, parkOf } from './rules.ts'
 import type { AgentRecord, Body, Cron } from './rules.ts'
 import { fakeRouter, LEASE_MS, replay } from './testing.ts'
 import type { FakeRouter, Reply } from './testing.ts'
@@ -1548,7 +1548,7 @@ test('a person editing the prompt is present at most once a minute and the prese
     await edit($, clock)
     await clock.advance(30000)
     await edit($, clock)
-    await clock.advance(PRESENCE_THROTTLE_MS - 30001)
+    await clock.advance(60000 - 30001)
     await edit($, clock)
     await clock.advance(1)
     await edit($, clock)
@@ -1561,7 +1561,7 @@ test('a person editing the prompt is present at most once a minute and the prese
       'state main busy',
     ])
     const present = router.requests.flatMap((body, index) => body.event === 'activity' ? [router.times[index]] : [])
-    expect(present).toEqual([T0, T0 + PRESENCE_THROTTLE_MS])
+    expect(present).toEqual([T0, T0 + 60000])
   })
 
 describe('unknown is never sent', () => {

@@ -39,7 +39,6 @@ type ParkFields = { park_kind: 'background' | 'scheduled' | 'both'; wake_at?: nu
 
 export type Park = { state: 'idle' } | ({ state: 'parked' } & ParkFields)
 
-export const PRESENCE_THROTTLE_MS = 60000
 const DEFAULT_COMMAND_TIMEOUT_MS = 1800000
 const MAX_COMMAND_TIMEOUT_MS = 7200000
 

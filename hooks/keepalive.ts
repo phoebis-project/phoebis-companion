@@ -14,7 +14,6 @@ import {
   ownerHeaderLines,
   ownerOf,
   parkOf,
-  PRESENCE_THROTTLE_MS,
   restore,
   reusable,
   sameAgent,
@@ -67,6 +66,7 @@ type Queue = {
   deferred: Map<string, { retryAt: number; attempt: number }>
 }
 
+const PRESENCE_THROTTLE_MS = 60000
 // The client removes a recurring cron after the fire at which it is this old. A one-shot has no age limit.
 const CRON_LIFETIME_MS = 604800000
 
