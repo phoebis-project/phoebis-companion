@@ -381,7 +381,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   on('env.set', (_$, e) => {
     router.reached.push('env.set')
     router.envWrites.push({ name: e.name, value: e.value })
-    return { value: undefined }
+    // The op answers an object whose deny field is absent when the write was made.
+    return { value: {} }
   })
   on('state.get', async (_$, e) => {
     router.reached.push('state.get')
@@ -477,7 +478,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   })
   on('agent.spawn', async (_$, e) => {
     const scripted = spawns.shift()
-    const recorded = scripted === undefined ? slots.spawn : await scripted()
+    const recorded: Replayed['spawn'] = scripted === undefined ? slots.spawn : await scripted()
     slots.spawn = undefined
     spawned += 1
     return {

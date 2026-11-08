@@ -1392,8 +1392,8 @@ async function storedPairs($: EngineInterface): Promise<StoredPair[]> {
 }
 
 async function keepPair($: EngineInterface, pairs: StoredPair[], processId: string, pair: Identity): Promise<void> {
-  const kept: StoredPair[] = [...pairs.filter(([id]) => id !== processId),
-    [processId, { instance: pair.instance, owner: pair.owner }]].slice(-KEPT_IDENTITIES)
+  const added: StoredPair = [processId, { instance: pair.instance, owner: pair.owner }]
+  const kept: StoredPair[] = [...pairs.filter(([id]) => id !== processId), added].slice(-KEPT_IDENTITIES)
   if (JSON.stringify(kept) === JSON.stringify(pairs)) return
   try {
     await $.store.set(IDENTITIES, kept)

@@ -1038,7 +1038,8 @@ test('a command leaves its open set only when a stop event\'s registry no longer
     expect(states(router).slice(settled)).toEqual([])
     // A command the registry lists as ended, whatever ended it, leaves the set, as does one it no longer lists.
     const remaining = ['bg-1', 'bg-2', 'bg-3', 'bg-4', 'bg-5']
-    for (const [task, status] of [['bg-5', 'completed'], ['bg-4', 'failed'], ['bg-3', 'killed'], ['bg-2', 'stopped']]) {
+    const ended = [['bg-5', 'completed'], ['bg-4', 'failed'], ['bg-3', 'killed'], ['bg-2', 'stopped']] as const
+    for (const [task, status] of ended) {
       remaining.splice(remaining.indexOf(task), 1)
       await stop($, clock, [...remaining.map((id) => ({ id, type: 'shell', status: 'running' })), { id: task, type: 'shell', status }])
     }
