@@ -64,3 +64,7 @@ against the budget and its GET does not, so both fit.
 **Tool registration.** The doc of `$.tool.register` says a name registered again is replaced, and the call rejects until
 the session binds, at `session.start`. A reload runs `session.start` again and registers the same tool under the same
 name, which replaces the registration without a second entry in the tool list.
+
+## License
+
+Released under the MIT license. See [`LICENSE`](LICENSE) for the full text.
