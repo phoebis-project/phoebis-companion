@@ -55,13 +55,19 @@ export const register: Register = (on, options) => {
     const client = base ?? version
     if (!versionAtLeast(client, MINIMUM_VERSION)) return next(e)
     const config = optionsOf(options)
+    const [baseUrl, authToken, apiKey, oauthToken] = await Promise.all([
+      $.env.get('ANTHROPIC_BASE_URL'),
+      $.env.get('ANTHROPIC_AUTH_TOKEN'),
+      $.env.get('ANTHROPIC_API_KEY'),
+      $.env.get('CLAUDE_CODE_OAUTH_TOKEN'),
+    ])
     const resolution = resolveSettings({
       managementUrl: config.managementUrl,
       token: config.token,
-      baseUrl: await $.env.get('ANTHROPIC_BASE_URL'),
-      authToken: await $.env.get('ANTHROPIC_AUTH_TOKEN'),
-      apiKey: await $.env.get('ANTHROPIC_API_KEY'),
-      oauthToken: await $.env.get('CLAUDE_CODE_OAUTH_TOKEN'),
+      baseUrl,
+      authToken,
+      apiKey,
+      oauthToken,
     })
     if ('missing' in resolution) {
       // An earlier start's settings would otherwise keep the lifecycle reporting, and the next session registering,

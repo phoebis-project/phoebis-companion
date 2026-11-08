@@ -417,16 +417,16 @@ test('the park kinds compose: background, scheduled, both and idle, and the dead
   const early: OpenTask = { id: 'bg-early', kind: 'command', deadline: T0 + 1000 }
   const late: OpenTask = { id: 'bg-late', kind: 'command', deadline: T0 + 5000 }
   const child: OpenTask = { id: 'agent-1', kind: 'subagent' }
-  expect(parkOf(record([]), [], T0)).toEqual({ state: 'idle' })
-  expect(parkOf(record([early, late]), [], T0))
+  expect(parkOf(record([]), [])).toEqual({ state: 'idle' })
+  expect(parkOf(record([early, late]), []))
     .toEqual({ state: 'parked', park_kind: 'background', deadline: T0 + 5000 })
-  expect(parkOf(record([early, child]), [], T0)).toEqual({ state: 'parked', park_kind: 'background' })
-  expect(parkOf(record([child]), [], T0)).toEqual({ state: 'parked', park_kind: 'background' })
-  expect(parkOf(record([]), [cron('c-1', T0 + 9000), cron('c-2', T0 + 3000)], T0))
+  expect(parkOf(record([early, child]), [])).toEqual({ state: 'parked', park_kind: 'background' })
+  expect(parkOf(record([child]), [])).toEqual({ state: 'parked', park_kind: 'background' })
+  expect(parkOf(record([]), [cron('c-1', T0 + 9000), cron('c-2', T0 + 3000)]))
     .toEqual({ state: 'parked', park_kind: 'scheduled', wake_at: T0 + 3000 })
-  expect(parkOf(record([late]), [cron('c-1', T0 + 9000)], T0))
+  expect(parkOf(record([late]), [cron('c-1', T0 + 9000)]))
     .toEqual({ state: 'parked', park_kind: 'both', wake_at: T0 + 9000, deadline: T0 + 5000 })
-  expect(parkOf(record([late, child]), [cron('c-1', T0 + 9000)], T0))
+  expect(parkOf(record([late, child]), [cron('c-1', T0 + 9000)]))
     .toEqual({ state: 'parked', park_kind: 'both', wake_at: T0 + 9000 })
 })
 

@@ -508,7 +508,7 @@ export function nextFireAt(expression: string, baseMs: number, id: string, recur
   return Math.ceil(grid + Math.min(idShare(id) * RECURRING_SHARE * period, RECURRING_CAP_MS))
 }
 
-export function parkOf(agent: AgentRecord, crons: Iterable<Cron>, now: number): Park {
+export function parkOf(agent: AgentRecord, crons: Iterable<Cron>): Park {
   let wakeAt: number | undefined
   for (const cron of crons) wakeAt = wakeAt === undefined ? cron.wakeAt : Math.min(wakeAt, cron.wakeAt)
   const background = agent.open.size > 0
@@ -606,9 +606,9 @@ function report(agentId: string, state: AgentRecord['state'], park?: Park): void
 }
 
 // A subagent rests parked on its own open work or not at all: with nothing open, its work went back to its parent.
-function rest(agent: AgentRecord, now: number): void {
-  const park = parkOf(agent, cronsOf(agent), now)
-  if (agent.id !== MAIN && park.state === 'idle') release(agent.id, now)
+function rest(agent: AgentRecord): void {
+  const park = parkOf(agent, cronsOf(agent))
+  if (agent.id !== MAIN && park.state === 'idle') release(agent.id)
   else report(agent.id, park.state, park)
 }
 
@@ -619,15 +619,15 @@ function busy(agentId: string): void {
 
 // Changes what an agent waits on. A busy agent's park is read at the end of its turn and a released one is gone, so
 // only a resting agent is reported here, and only when the park the router holds moved.
-function change(agent: AgentRecord, edit: () => void, now: number): void {
-  const before = parkOf(agent, cronsOf(agent), now)
+function change(agent: AgentRecord, edit: () => void): void {
+  const before = parkOf(agent, cronsOf(agent))
   edit()
   if (model.agents.get(agent.id) !== agent || agent.state === 'busy') return
-  const after = parkOf(agent, cronsOf(agent), now)
-  if (!samePark(before, after)) rest(agent, now)
+  const after = parkOf(agent, cronsOf(agent))
+  if (!samePark(before, after)) rest(agent)
 }
 
-function release(agentId: string, now: number): void {
+function release(agentId: string): void {
   if (agentId === MAIN) return
   const known = model.agents.delete(agentId)
   model.turning.delete(agentId)
@@ -639,20 +639,20 @@ function release(agentId: string, now: number): void {
   // A released agent that resumes under its id is announced again, which restarts it on the router.
   session?.announced.delete(agentId)
   for (const owner of [...model.agents.values()]) {
-    if (owner.open.has(agentId)) change(owner, () => owner.open.delete(agentId), now)
+    if (owner.open.has(agentId)) change(owner, () => owner.open.delete(agentId))
   }
 }
 
 // A live agent the mod meets first in the client's list or the router's answer (one that ran before this load, or one
 // resumed after its release) joins its parent's open set, so the parent stays parked on it until it ends.
-function adopt(agentId: string, parentId: string | undefined, state: AgentRecord['state'], now: number): void {
+function adopt(agentId: string, parentId: string | undefined, state: AgentRecord['state']): void {
   const parent = parentId ?? MAIN
   const agent = freshRecord(agentId, state, parent)
   model.released.delete(agentId)
   session?.routerReleased.delete(agentId)
   model.agents.set(agentId, agent)
   const owner = model.agents.get(parent)
-  if (owner !== undefined) change(owner, () => owner.open.set(agentId, { id: agentId, kind: 'subagent' }), now)
+  if (owner !== undefined) change(owner, () => owner.open.set(agentId, { id: agentId, kind: 'subagent' }))
 }
 
 // The agent an event of this loop counts for, once the mod has judged the loop.
@@ -672,7 +672,7 @@ async function attribute($: EngineInterface, agentId: string | undefined): Promi
   const listed = await agentList($)
   const info = listed?.find((agent) => agent.id === agentId)
   if (info !== undefined) {
-    adopt(agentId, info.parentId, 'idle', await $.clock.now())
+    adopt(agentId, info.parentId, 'idle')
     return agentId
   }
   // An unreadable list judges nothing, so the loop's next event asks again.
@@ -683,7 +683,7 @@ async function attribute($: EngineInterface, agentId: string | undefined): Promi
 // The task registry the client attaches to a stop event. An open command the registry no longer runs has ended,
 // whatever ended it, and one the registry never held cannot wake its loop, so both leave their owner's open set. A
 // subagent's life is the agent list's to tell, so the registry's subagent rows are left to it.
-function tasksStopped(listed: unknown, now: number): void {
+function tasksStopped(listed: unknown): void {
   if (!Array.isArray(listed)) return
   const running = new Set<string>()
   for (const entry of listed) {
@@ -693,7 +693,7 @@ function tasksStopped(listed: unknown, now: number): void {
   }
   for (const owner of [...model.agents.values()]) {
     for (const task of [...owner.open.values()]) {
-      if (task.kind === 'command' && !running.has(task.id)) change(owner, () => owner.open.delete(task.id), now)
+      if (task.kind === 'command' && !running.has(task.id)) change(owner, () => owner.open.delete(task.id))
     }
   }
 }
@@ -720,19 +720,21 @@ function fired(now: number): void {
       if (next === undefined) model.crons.delete(cron.id)
       else cron.wakeAt = next
     }
-  }, now)
+  })
 }
 
-function toolRan(agentId: string, e: { tool: string; tool_use_id: string }, result: unknown, now: number): void {
-  const main = mainAgent()
+async function toolRan($: EngineInterface, agentId: string, e: { tool: string; tool_use_id: string },
+  result: unknown): Promise<void> {
   switch (e.tool) {
     case 'Bash': {
       const task = field(result, 'backgroundTaskId')
+      if (typeof task !== 'string') return
+      const now = await $.clock.now()
       const owner = model.agents.get(agentId)
-      if (typeof task !== 'string' || owner === undefined) return
+      if (owner === undefined) return
       const timeout = field(e, 'timeout')
       const deadline = commandDeadline(now, typeof timeout === 'number' ? timeout : undefined, model.env)
-      change(owner, () => owner.open.set(task, { id: task, kind: 'command', deadline }), now)
+      change(owner, () => owner.open.set(task, { id: task, kind: 'command', deadline }))
       if (owner.id === MAIN && model.turning.has(MAIN)) model.current.add(task)
       return
     }
@@ -742,10 +744,11 @@ function toolRan(agentId: string, e: { tool: string; tool_use_id: string }, resu
       const recurring = field(e, 'recurring')
       if (typeof id !== 'string' || typeof expression !== 'string') return
       const repeats = typeof recurring === 'boolean' ? recurring : true
+      const now = await $.clock.now()
       const wakeAt = nextFireAt(expression, now, id, repeats)
       if (wakeAt === undefined) return
       const cron: Cron = { id, wakeAt, recurring: repeats, expression, createdAt: now }
-      change(main, () => model.crons.set(id, cron), now)
+      change(mainAgent(), () => model.crons.set(id, cron))
       return
     }
     case 'ScheduleWakeup': {
@@ -753,7 +756,8 @@ function toolRan(agentId: string, e: { tool: string; tool_use_id: string }, resu
       const wakeAt = field(result, 'scheduledFor')
       const delay = field(result, 'clampedDelaySeconds')
       if (!stop && typeof wakeAt !== 'number') return
-      change(main, () => {
+      const now = await $.clock.now()
+      change(mainAgent(), () => {
         // The client cancels every pending wakeup when the model reschedules the loop or stops it.
         for (const id of [...model.crons.keys()]) if (id.startsWith(WAKEUP)) model.crons.delete(id)
         // An answer with no time is a loop that aged out, which the client ends with its pending wakeups.
@@ -762,18 +766,18 @@ function toolRan(agentId: string, e: { tool: string; tool_use_id: string }, resu
         // The client records the wakeup as created at the asked time, or just before the minute it rounded to.
         const createdAt = typeof delay === 'number' ? Math.min(now + delay * 1000, wakeAt - 1) : now
         model.crons.set(id, { id, wakeAt, recurring: false, createdAt })
-      }, now)
+      })
       return
     }
     case 'CronDelete': {
       const id = field(e, 'id')
-      if (typeof id === 'string') change(main, () => model.crons.delete(id), now)
+      if (typeof id === 'string') change(mainAgent(), () => model.crons.delete(id))
       return
     }
   }
 }
 
-function spawned(agentId: string, parentId: string, now: number): void {
+function spawned(agentId: string, parentId: string): void {
   // A step that reached the mod before the client's list named the agent counted it for main until now.
   model.unlisted.delete(agentId)
   model.released.delete(agentId)
@@ -786,18 +790,18 @@ function spawned(agentId: string, parentId: string, now: number): void {
     known.parent = parentId
   }
   const parent = model.agents.get(parentId)
-  if (parent !== undefined) change(parent, () => parent.open.set(agentId, { id: agentId, kind: 'subagent' }), now)
+  if (parent !== undefined) change(parent, () => parent.open.set(agentId, { id: agentId, kind: 'subagent' }))
 }
 
 // An unlisted loop's turn end rests the agent it counts for, unless that agent's own turn still runs.
-function restHost(agentId: string, now: number): void {
+function restHost(agentId: string): void {
   const agent = model.agents.get(agentId)
-  if (agent !== undefined && !model.turning.has(agentId)) rest(agent, now)
+  if (agent !== undefined && !model.turning.has(agentId)) rest(agent)
 }
 
-async function turnEnded($: EngineInterface, agentId: string, now: number): Promise<void> {
+async function turnEnded($: EngineInterface, agentId: string): Promise<void> {
   if (model.unlisted.has(agentId)) {
-    restHost(holder(agentId) ?? MAIN, now)
+    restHost(holder(agentId) ?? MAIN)
     return
   }
   // An unreadable list leaves the turn end to the tick.
@@ -807,18 +811,18 @@ async function turnEnded($: EngineInterface, agentId: string, now: number): Prom
   const agent = model.agents.get(agentId)
   if (info === undefined && agent === undefined) {
     model.unlisted.set(agentId, MAIN)
-    restHost(MAIN, now)
+    restHost(MAIN)
     return
   }
   if (info === undefined || ENDED.has(info.status)) {
-    release(agentId, now)
+    release(agentId)
     return
   }
   // An agent the mod never held has nothing open of its own and was never announced, so there is nothing to report.
   if (agent === undefined) return
   model.turning.delete(agentId)
   // A subagent with work of its own still open has a turn to come, so it parks on that work as main does.
-  rest(agent, now)
+  rest(agent)
 }
 
 async function reconcile($: EngineInterface): Promise<void> {
@@ -834,7 +838,7 @@ async function reconcile($: EngineInterface): Promise<void> {
   for (const agent of candidates) {
     if (model.agents.get(agent.id) !== agent) continue
     const status = listed.get(agent.id)
-    if (status === undefined || ENDED.has(status)) release(agent.id, now)
+    if (status === undefined || ENDED.has(status)) release(agent.id)
   }
   // A command is stopped at its deadline, so the first tick past it closes the task when no notification did.
   for (const owner of [...model.agents.values()]) {
@@ -842,19 +846,19 @@ async function reconcile($: EngineInterface): Promise<void> {
       for (const task of [...owner.open.values()]) {
         if (task.kind === 'command' && task.deadline !== undefined && task.deadline <= now) owner.open.delete(task.id)
       }
-    }, now)
+    })
   }
 }
 
-function restate(agent: AgentRecord, now: number): void {
+function restate(agent: AgentRecord): void {
   if (agent.state === 'busy') report(agent.id, 'busy')
-  else rest(agent, now)
+  else rest(agent)
 }
 
 // The registration's answer names every agent the router holds. Each side learns what the other lacks: an agent
 // only the router holds is rebuilt from the client's list or released, a state the router holds wrongly is sent
 // again, and an agent only the mod holds is announced with its state.
-function reconcileAck(entries: unknown[], listed: AgentInfo[] | undefined, now: number): void {
+function reconcileAck(entries: unknown[], listed: AgentInfo[] | undefined): void {
   const held = new Map<string, unknown>()
   for (const entry of entries) {
     const id = field(entry, 'agent_id')
@@ -866,7 +870,7 @@ function reconcileAck(entries: unknown[], listed: AgentInfo[] | undefined, now: 
     if (state === 'released') continue
     const agent = model.agents.get(id)
     if (agent !== undefined) {
-      if (state !== agent.state) restate(agent, now)
+      if (state !== agent.state) restate(agent)
       continue
     }
     // The answer names the run this mod released. The release ends it on the router, so the agent is not adopted
@@ -894,7 +898,7 @@ function reconcileAck(entries: unknown[], listed: AgentInfo[] | undefined, now: 
     const at = live.findIndex((info) => !live.some((other) => other.id === (info.parentId ?? MAIN)))
     const [info] = live.splice(at < 0 ? 0 : at, 1)
     if (info === undefined) break
-    adopt(info.id, info.parentId, 'busy', now)
+    adopt(info.id, info.parentId, 'busy')
     report(info.id, 'busy')
   }
   for (const agent of [...model.agents.values()]) {
@@ -907,7 +911,7 @@ function reconcileAck(entries: unknown[], listed: AgentInfo[] | undefined, now: 
       session?.announced.delete(agent.id)
       queue.reports = collapse(queue.reports, { event: 'agent_start', agent_id: agent.id })
     }
-    restate(agent, now)
+    restate(agent)
   }
 }
 
@@ -1221,7 +1225,7 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
   queue.attempt = 0
   queue.retryAt = undefined
   // An answer without the member says nothing about the router's agents, so nothing is reconciled against it.
-  if (report.event === 'session_start' && Array.isArray(ack.agents)) reconcileAck(agents, listed, now)
+  if (report.event === 'session_start' && Array.isArray(ack.agents)) reconcileAck(agents, listed)
 }
 
 function refusedReport($: EngineInterface, record: SessionRecord, report: Report,
@@ -1378,10 +1382,12 @@ async function keepPair($: EngineInterface, pairs: StoredPair[], processId: stri
 // the same process keeps the pair under any session id of the process, so the router's session keeps its owner, and
 // any other process mints its own.
 async function fence($: EngineInterface): Promise<Identity> {
-  const existing = await $.env.get('ANTHROPIC_CUSTOM_HEADERS')
-  const variable = await $.env.get('PHOEBIS_KEEPALIVE_INSTANCE')
+  const [existing, variable, { value: held }] = await Promise.all([
+    $.env.get('ANTHROPIC_CUSTOM_HEADERS'),
+    $.env.get('PHOEBIS_KEEPALIVE_INSTANCE'),
+    $.state.get(IDENTITY_REF),
+  ])
   const owner = ownerOf(existing)
-  const held = (await $.state.get(IDENTITY_REF)).value
   const processId = await processIdentity($)
   const pairs = processId === undefined ? [] : await storedPairs($)
   let pair: Identity
@@ -1408,10 +1414,11 @@ export async function startKeepalive($: EngineInterface, resolved: Settings): Pr
   if (!refused) identity = await fence($)
   settings = resolved
   if (active()) {
-    model.env = {
-      defaultMs: milliseconds(await $.env.get('BASH_DEFAULT_TIMEOUT_MS')),
-      maxMs: milliseconds(await $.env.get('BASH_MAX_TIMEOUT_MS')),
-    }
+    const [defaultMs, maxMs] = await Promise.all([
+      $.env.get('BASH_DEFAULT_TIMEOUT_MS'),
+      $.env.get('BASH_MAX_TIMEOUT_MS'),
+    ])
+    model.env = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
     await ensureSession($)
     void pump($)
   }
@@ -1428,9 +1435,8 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
     if (active()) {
       await ensureSession($)
       if (live()) {
-        const now = await $.clock.now()
         if (e.origin.kind === 'scheduled-trigger') {
-          fired(now)
+          fired(await $.clock.now())
         } else if (isRealPrompt(e.origin)) {
           // The router marks main busy on the prompt itself, so no state report goes with it.
           queue.reports = collapse(queue.reports, { event: 'activity', agent_id: MAIN, kind: 'prompt' })
@@ -1453,17 +1459,15 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
 
   // Presence resets the router's idle clock and nothing else. The hook's budget is short, so it only queues.
   on('prompt.edit', async ($, e, next) => {
-    if (!enabled()) return next(e)
-    if (live()) {
-      const main = mainAgent()
-      const now = await $.clock.now()
-      if (now - main.lastPresence >= PRESENCE_THROTTLE_MS) {
-        main.lastPresence = now
-        queue.reports = collapse(queue.reports, { event: 'activity', agent_id: MAIN, kind: 'presence' })
-      }
-      void pump($)
+    if (!enabled() || !live()) return next(e)
+    const main = mainAgent()
+    const [r, now] = await Promise.all([next(e), $.clock.now()])
+    if (now - main.lastPresence >= PRESENCE_THROTTLE_MS) {
+      main.lastPresence = now
+      queue.reports = collapse(queue.reports, { event: 'activity', agent_id: MAIN, kind: 'presence' })
     }
-    return next(e)
+    void pump($)
+    return r
   }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
@@ -1495,7 +1499,7 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
     const record = session
     const r = await next(e)
     if (live() && session === record && r.deny === undefined) {
-      toolRan(agentId, e, r.result, await $.clock.now())
+      await toolRan($, agentId, e, r.result)
       void pump($)
     }
     return r
@@ -1511,7 +1515,7 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
       // A workflow's agent is a loop the client's list never names, so it works for its parent. The marker is read
       // loosely, since the oldest supported client's declarations lack it.
       if (field(e, 'workflow') !== undefined) model.unlisted.set(agentId, parent)
-      else spawned(agentId, parent, await $.clock.now())
+      else spawned(agentId, parent)
       void pump($)
     }
     return r
@@ -1520,13 +1524,12 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
   on('turn.complete', async ($, e, next) => {
     if (!enabled()) return next(e)
     if (live()) {
-      const now = await $.clock.now()
       if (e.agentId === undefined) {
         model.turning.delete(MAIN)
         model.current.clear()
-        rest(mainAgent(), now)
+        rest(mainAgent())
       } else {
-        await turnEnded($, e.agentId, now)
+        await turnEnded($, e.agentId)
       }
       void pump($)
     }
@@ -1538,7 +1541,7 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
   on('classic.Stop', async ($, e, next) => {
     if (!enabled()) return next(e)
     if (live()) {
-      tasksStopped(field(e, 'background_tasks'), await $.clock.now())
+      tasksStopped(field(e, 'background_tasks'))
       void pump($)
     }
     return next(e)
@@ -1547,7 +1550,7 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
   on('classic.SubagentStop', async ($, e, next) => {
     if (!enabled()) return next(e)
     if (live()) {
-      tasksStopped(field(e, 'background_tasks'), await $.clock.now())
+      tasksStopped(field(e, 'background_tasks'))
       void pump($)
     }
     return next(e)
