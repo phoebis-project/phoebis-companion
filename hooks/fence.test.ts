@@ -7,8 +7,8 @@ import runB from './fixtures/run-b.ts'
 import runC from './fixtures/run-c.ts'
 import runE from './fixtures/run-e.ts'
 import runH from './fixtures/run-h.ts'
-import { nextSequence, OWNER_HEADER, ownerHeaderLines, ownerOf, reusable } from './keepalive.ts'
-import type { Body } from './keepalive.ts'
+import { nextSequence, ownerHeaderLines, ownerOf, reusable } from './rules.ts'
+import type { Body } from './rules.ts'
 import { fakeRouter, replay } from './testing.ts'
 import type { FakeOptions, FakeRouter, Reply } from './testing.ts'
 
@@ -318,7 +318,6 @@ test('the owner id reaches no log line and no header of the mod\'s own requests'
 })
 
 test('the owner line is read and replaced whatever the case of its name, and every other line stays', () => {
-  expect(OWNER_HEADER).toBe('X-Keepalive-Owner-Id')
   expect(ownerOf(undefined)).toBeUndefined()
   expect(ownerOf('X-A: 1')).toBeUndefined()
   expect(ownerOf('X-A: 1\r\nx-keepalive-owner-id:  u-1 \nX-B: 2')).toBe('u-1')

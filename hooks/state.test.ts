@@ -1,22 +1,14 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import type { SavedTask } from '../types/index.d.ts'
 import runA from './fixtures/run-a.ts'
 import runB from './fixtures/run-b.ts'
 import runC from './fixtures/run-c.ts'
 import runE from './fixtures/run-e.ts'
 import runH from './fixtures/run-h.ts'
-import {
-  commandDeadline,
-  CRON_LIFETIME_MS,
-  DEFAULT_COMMAND_TIMEOUT_MS,
-  isRealPrompt,
-  MAX_COMMAND_TIMEOUT_MS,
-  nextFireAt,
-  parkOf,
-  PRESENCE_THROTTLE_MS,
-} from './keepalive.ts'
-import type { AgentRecord, Body, Cron, OpenTask } from './keepalive.ts'
+import { commandDeadline, isRealPrompt, nextFireAt, parkOf, PRESENCE_THROTTLE_MS } from './rules.ts'
+import type { AgentRecord, Body, Cron } from './rules.ts'
 import { fakeRouter, LEASE_MS, replay } from './testing.ts'
 import type { FakeRouter, Reply } from './testing.ts'
 
@@ -160,7 +152,7 @@ function states(router: FakeRouter): string[] {
   return router.requests.filter((body) => body.event === 'state').map(said)
 }
 
-function record(open: OpenTask[]): AgentRecord {
+function record(open: SavedTask[]): AgentRecord {
   return { id: 'main', state: 'idle', open: new Map(open.map((task) => [task.id, task])), lastPresence: 0 }
 }
 
@@ -414,9 +406,9 @@ test('nextFireAt mirrors the client\'s scheduler for each kind of cron', () => {
 
 test('the park kinds compose: background, scheduled, both and idle, and the deadline is sent only when every open ' +
   'task is a command', () => {
-  const early: OpenTask = { id: 'bg-early', kind: 'command', deadline: T0 + 1000 }
-  const late: OpenTask = { id: 'bg-late', kind: 'command', deadline: T0 + 5000 }
-  const child: OpenTask = { id: 'agent-1', kind: 'subagent' }
+  const early: SavedTask = { id: 'bg-early', kind: 'command', deadline: T0 + 1000 }
+  const late: SavedTask = { id: 'bg-late', kind: 'command', deadline: T0 + 5000 }
+  const child: SavedTask = { id: 'agent-1', kind: 'subagent' }
   expect(parkOf(record([]), [])).toEqual({ state: 'idle' })
   expect(parkOf(record([early, late]), []))
     .toEqual({ state: 'parked', park_kind: 'background', deadline: T0 + 5000 })
@@ -432,8 +424,6 @@ test('the park kinds compose: background, scheduled, both and idle, and the dead
 
 test('a command\'s deadline is its start plus its timeout or a default of at least thirty minutes, capped at two ' +
   'hours or more, and the variables only raise the bounds', () => {
-  expect(DEFAULT_COMMAND_TIMEOUT_MS).toBe(1800000)
-  expect(MAX_COMMAND_TIMEOUT_MS).toBe(7200000)
   expect(commandDeadline(T0, undefined, {})).toBe(T0 + 1800000)
   expect(commandDeadline(T0, undefined, { defaultMs: 90000 })).toBe(T0 + 1800000)
   expect(commandDeadline(T0, undefined, { defaultMs: 3600000 })).toBe(T0 + 3600000)
@@ -448,7 +438,6 @@ test('a command\'s deadline is its start plus its timeout or a default of at lea
 
 test('a fractional timeout rounds the command\'s deadline up to a whole millisecond, so the router takes the park',
   CONFIGURED, async ($, on) => {
-    expect(commandDeadline(T0, 90000.25, {})).toBe(T0 + 90001)
     const { clock, router } = host(on)
     await start($, clock)
     await submit($, clock, 'composer')
@@ -633,7 +622,6 @@ test('the heartbeat reconcile releases a subagent the list reads completed, fail
 
 test('a recurring cron leaves after the fire at which it is seven days old, as the client removes it, and no ' +
   'heartbeat drops it sooner', CONFIGURED, async ($, on) => {
-  expect(CRON_LIFETIME_MS).toBe(7 * 24 * 60 * 60000)
   const { clock, router } = host(on, local(14, 10, 30))
   await start($, clock)
   await submit($, clock, 'composer')

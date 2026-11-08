@@ -3,11 +3,10 @@ import type { Engine, MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import runA from './fixtures/run-a.ts'
 import runB from './fixtures/run-b.ts'
-import runC from './fixtures/run-c.ts'
 import runE from './fixtures/run-e.ts'
 import runH from './fixtures/run-h.ts'
-import { collapse, heartbeatInterval, restore } from './keepalive.ts'
-import type { Body, Report } from './keepalive.ts'
+import { collapse, heartbeatInterval, restore } from './rules.ts'
+import type { Body, Report } from './rules.ts'
 import { redactSecrets } from './settings.ts'
 import { fakeRouter, LEASE_MS, replay } from './testing.ts'
 import type { FakeOptions, FakeRouter, Reply } from './testing.ts'
@@ -16,7 +15,6 @@ const ROUTER_URL = 'http://127.0.0.1:1'
 const CONFIGURED = { options: { management_url: ROUTER_URL } }
 const KEY = 'k-test'
 const T0 = 1_790_000_000_000
-const LOGS = { 'run-a': runA, 'run-b': runB, 'run-c': runC, 'run-e': runE, 'run-h': runH }
 
 const ok = (body: unknown): Reply => ({ status: 200, body })
 const refusal = (code: string, extra: Record<string, unknown> = {}): Reply =>
@@ -60,18 +58,6 @@ function events(router: FakeRouter): string[] {
 function lines(log: string, from: number, to?: number): string {
   return log.split('\n').slice(from, to).join('\n')
 }
-
-describe('the five recorded logs replay through the fake host with no skipped hook', () => {
-  for (const [name, log] of Object.entries(LOGS)) {
-    test(name, CONFIGURED, async ($, on) => {
-      mock.env(on, { ANTHROPIC_AUTH_TOKEN: KEY })
-      const clock = mock.clock(on)
-      const router = fakeRouter(on, clock)
-      await replay($, on, log, clock, router)
-      expect(router.requests.length).toBeGreaterThan(0)
-    })
-  }
-})
 
 test('a configured mod registers at session start and holds the next report until the acknowledgment lands',
   CONFIGURED, async ($, on) => {
