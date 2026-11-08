@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-label="Phoebis Companion">
   <title>Phoebis Companion</title>
 
-  <!-- Editable master of the square lockup (the listing icon and the social preview); the wordmark needs Audiowide
+  <!-- Editable master of the square lockup (the listing icon and the social preview). The wordmark needs Audiowide
        installed (SIL Open Font License, fonts.google.com/specimen/Audiowide). Regenerate the self-contained copy:
        rsvg-convert -f svg lockup-light.svg -o ../lockup-light.svg -->
   <rect width="1000" height="1000" fill="#FFFFFF"/>

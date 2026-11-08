@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 170" role="img" aria-label="Phoebis Companion">
   <title>Phoebis Companion</title>
 
-  <!-- Editable master; the wordmark needs Audiowide installed (SIL Open Font License, fonts.google.com/specimen/Audiowide)
+  <!-- Editable master. The wordmark needs Audiowide installed (SIL Open Font License, fonts.google.com/specimen/Audiowide)
        and the tagline DejaVu Sans. Regenerate the self-contained copy the README uses:
        rsvg-convert -f svg logo-dark.svg -o ../logo-dark.svg -->
-  <!-- The family's Pixel butterfly, reduced, above and right of a pixel prompt: the companion lives in the session -->
+  <!-- Phoebis Router's Pixel butterfly, reduced, above and right of a pixel prompt: the companion lives in the session -->
   <g transform="translate(107.75 16) scale(0.65)">
     <rect x="54" y="6" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
     <rect x="102" y="6" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
