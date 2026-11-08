@@ -8,7 +8,7 @@ import type { Settings } from './settings.ts'
 
 const ALLOWANCE_PATH = '/v0/companion/allowance'
 const TOOL_NAME = 'allowance'
-export const TOOL_CALL = 'mcp__phoebis-companion__allowance'
+export const TOOL_CALL = `mcp__phoebis-companion__${TOOL_NAME}` as const
 const CACHE_MS = 10_000
 // The start check and a call both wait this long for the router, inside the 10 s a hook has per dispatch: a router
 // that accepts the connection and never answers would otherwise hold the session start or the model's call with it.
@@ -73,36 +73,35 @@ async function fetchAllowance($: EngineInterface, settings: Settings, sessionId:
   }
 }
 
-/** The GET bounded by WAIT_MS: its answer, or 'timeout' when the wait ends first and the answer is dropped. */
-function fetchWithin($: EngineInterface, settings: Settings, sessionId: string): Promise<Fetched | 'timeout'> {
+/** The GET bounded by WAIT_MS: its answer, or a failure when the wait ends first and the answer is dropped. */
+function fetchWithin($: EngineInterface, settings: Settings, sessionId: string): Promise<Fetched> {
   return Promise.race([
     fetchAllowance($, settings, sessionId),
-    $.clock.sleep(WAIT_MS).then(() => 'timeout' as const),
+    $.clock.sleep(WAIT_MS).then((): Fetched => ({ failure: `no answer within ${WAIT_MS / 1000} seconds` })),
   ])
 }
 
 /** The body of a `200` that is the allowance, which is the one answer the cache may hold. */
-function allowanceOf(fetched: Fetched | 'timeout'): string | undefined {
-  if (fetched === 'timeout' || 'failure' in fetched) return undefined
+function allowanceOf(fetched: Fetched): string | undefined {
+  if ('failure' in fetched) return undefined
   return fetched.status === 200 && isAllowance(fetched.text) ? fetched.text : undefined
 }
 
-function outcomeOf(fetched: Fetched | 'timeout'): StartOutcome {
-  if (allowanceOf(fetched) !== undefined) return 'register'
-  if (fetched === 'timeout' || 'failure' in fetched) return 'unreachable'
+function outcomeOf(fetched: Fetched, body: string | undefined): StartOutcome {
+  if (body !== undefined) return 'register'
+  if ('failure' in fetched) return 'unreachable'
   if (fetched.status === 401) return 'refused'
   if (fetched.status === 403 && parsed(fetched.text).code === 'companion_not_permitted') return 'not_permitted'
   return 'unreachable'
 }
 
 /** The parenthesis of the unreachable line and of the tool's error text. */
-function reasonOf(fetched: Fetched | 'timeout'): string {
-  if (fetched === 'timeout') return `no answer within ${WAIT_MS / 1000} seconds`
+function reasonOf(fetched: Fetched): string {
   if ('failure' in fetched) return fetched.failure
   return fetched.status === 200 ? 'not the allowance' : String(fetched.status)
 }
 
-function unreachable(fetched: Fetched | 'timeout', settings: Settings): string {
+function unreachable(fetched: Fetched, settings: Settings): string {
   return redactSecrets(`no answer from the router at ${settings.url} (${reasonOf(fetched)})`, settings.key)
 }
 
@@ -156,8 +155,8 @@ export async function startCheck($: EngineInterface, settings: Settings, session
   cache = undefined
   const now = await $.clock.now()
   const fetched = await fetchWithin($, settings, sessionId)
-  const outcome = outcomeOf(fetched)
   const body = allowanceOf(fetched)
+  const outcome = outcomeOf(fetched, body)
   if (body !== undefined) cache = { at: now, sessionId, text: body }
   if (outcome === 'not_permitted') $.ui.log(NOT_PERMITTED, { to: 'debug' })
   if (outcome === 'refused' || outcome === 'unreachable') {
