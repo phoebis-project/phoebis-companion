@@ -1,9 +1,9 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { MINIMUM_VERSION, resolveSettings, versionAtLeast } from './keepalive.ts'
-import type { SettingSources } from './keepalive.ts'
-import { urlProblem } from './settings.ts'
+import { MINIMUM_VERSION } from './keepalive.ts'
+import { resolveSettings, urlProblem, versionAtLeast } from './settings.ts'
+import type { SettingSources } from './settings.ts'
 import { fakeRouter } from './testing.ts'
 import type { FakeRouter } from './testing.ts'
 

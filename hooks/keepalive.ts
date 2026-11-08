@@ -1,23 +1,10 @@
 import type { AgentInfo, EngineInterface, HttpResponse, On, Timer } from 'claude-code'
 import type { Identity, SavedAgent, SavedModel } from '../types/index.d.ts'
+import { bearer, errorText, parsed, redactSecrets } from './settings.ts'
+import type { Settings } from './settings.ts'
 
 // The oldest client whose hook events this module was checked against.
 export const MINIMUM_VERSION: readonly [number, number, number] = [2, 1, 287]
-
-export type Settings = { url: string; key: string }
-
-export type SettingSources = {
-  managementUrl: unknown
-  token: unknown
-  baseUrl: string | undefined
-  authToken: string | undefined
-  apiKey: string | undefined
-  oauthToken: string | undefined
-}
-
-export type Resolution =
-  | { settings: Settings }
-  | { missing: 'no_url' | 'no_token' | 'token_without_url' }
 
 export type Report =
   | { event: 'session_start'; owner_id?: string; previous_instance_id?: string }
@@ -184,41 +171,6 @@ const model: Model = {
   turning: new Set(),
   current: new Set(),
   released: new Set(),
-}
-
-export function versionAtLeast(version: string, minimum: readonly [number, number, number]): boolean {
-  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version)
-  if (match === null) return false
-  const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])]
-  const [leastMajor, leastMinor, leastPatch] = minimum
-  if (major !== leastMajor) return major > leastMajor
-  if (minor !== leastMinor) return minor > leastMinor
-  return patch >= leastPatch
-}
-
-function given(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : trimmed
-}
-
-// A repository's settings can set ANTHROPIC_BASE_URL, so that URL carries the environment's own token alone, and the
-// token setting goes to management_url or nowhere.
-function tokenWithoutUrl(sources: SettingSources): boolean {
-  return given(sources.token) !== undefined && given(sources.managementUrl) === undefined
-}
-
-/** The URL and the key the mod reports under, or which source is missing. A token from the setting needs the URL. */
-export function resolveSettings(sources: SettingSources): Resolution {
-  if (tokenWithoutUrl(sources)) return { missing: 'token_without_url' }
-  const url = given(sources.managementUrl) ?? given(sources.baseUrl)
-  if (url === undefined) return { missing: 'no_url' }
-  // The variables rank as the client ranks them, so the key the mod reports under is the key the client sends.
-  const key =
-    given(sources.token) ?? given(sources.authToken) ?? given(sources.apiKey) ?? given(sources.oauthToken)
-  if (key === undefined) return { missing: 'no_token' }
-  // Route paths are appended to the URL, so a trailing slash would double.
-  return { settings: { url: url.endsWith('/') ? url.slice(0, -1) : url, key } }
 }
 
 // A line of ANTHROPIC_CUSTOM_HEADERS as the client reads it: the name before the first colon, the value after it.
@@ -938,29 +890,8 @@ function reregister(): void {
 function request(config: Settings, body: Body): { method: string; headers: Record<string, string>; body: string } {
   return {
     method: 'POST',
-    headers: { Authorization: 'Bearer ' + config.key, 'Content-Type': 'application/json' },
+    headers: { ...bearer(config.key), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }
-}
-
-/**
- * An error's message with the configured key and any URL userinfo taken out, so a host error that quotes the request
- * leaves no credential in the debug log, whatever the host put in the message. The key goes first, so a key inside
- * a URL's userinfo is covered twice over. The userinfo runs from the scheme's `://` to the last `@` before the first
- * `/` after it, whitespace included, since a password may carry a raw `@` or a space and a raw `/` ends the authority.
- * Text after a `://` that is no userinfo but holds an `@` before the next `/` is taken out too, the safe direction.
- */
-export function redactSecrets(message: string, key: string): string {
-  const withoutKey = key === '' ? message : message.split(key).join('<key>')
-  return withoutKey.replace(/:\/\/[^/]+@/g, '://<redacted>@')
-}
-
-function parsed(text: string): Record<string, unknown> {
-  try {
-    const value: unknown = JSON.parse(text)
-    return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
-  } catch {
-    return {}
   }
 }
 
@@ -1091,7 +1022,7 @@ async function pump($: EngineInterface): Promise<void> {
       // message is the host's and may quote the request, so the key and any URL credentials leave it first.
       response = undefined
       try {
-        const reason = redactSecrets(error instanceof Error ? error.message : String(error), config.key)
+        const reason = redactSecrets(errorText(error), config.key)
         $.ui.log(`the ${report.event} report could not be sent (${reason}), so the mod retries under its backoff ` +
           'unless the session ends first', { to: 'debug' })
       } catch {
@@ -1429,9 +1360,8 @@ export function clearSettings(): void {
   settings = undefined
 }
 
-export function installKeepalive(on: On, enabled: () => boolean): void {
+export function installKeepalive(on: On): void {
   on('prompt.submit', async ($, e, next) => {
-    if (!enabled()) return next(e)
     if (active()) {
       await ensureSession($)
       if (live()) {
@@ -1459,7 +1389,7 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
 
   // Presence resets the router's idle clock and nothing else. The hook's budget is short, so it only queues.
   on('prompt.edit', async ($, e, next) => {
-    if (!enabled() || !live()) return next(e)
+    if (!live()) return next(e)
     const main = mainAgent()
     const [r, now] = await Promise.all([next(e), $.clock.now()])
     if (now - main.lastPresence >= PRESENCE_THROTTLE_MS) {
@@ -1471,7 +1401,6 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
   }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
-    if (!enabled()) return yield* next(e)
     if (live()) {
       const agentId = await attribute($, e.agentId)
       // Only a loop's own step starts its agent's turn: a fork working for main neither starts nor ends main's.
@@ -1485,7 +1414,6 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
   })
 
   on('tool.call', async ($, e, next) => {
-    if (!enabled()) return next(e)
     // A call another plugin raised is not the model's work, though what it starts belongs to the session.
     const raised = next.origin.plugin !== 'engine'
     let agentId = MAIN
@@ -1506,7 +1434,6 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
-    if (!enabled()) return next(e)
     const record = session
     const r = await next(e)
     const agentId = field(r, 'agentId')
@@ -1522,7 +1449,6 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
-    if (!enabled()) return next(e)
     if (live()) {
       if (e.agentId === undefined) {
         model.turning.delete(MAIN)
@@ -1539,7 +1465,6 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
   // The client's task registry rides every stop event, of main and of each subagent, so a command's end is read
   // there and never from the text of the notification that reported it.
   on('classic.Stop', async ($, e, next) => {
-    if (!enabled()) return next(e)
     if (live()) {
       tasksStopped(field(e, 'background_tasks'))
       void pump($)
@@ -1548,7 +1473,6 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
   }).catch(($, e, next) => next(e))
 
   on('classic.SubagentStop', async ($, e, next) => {
-    if (!enabled()) return next(e)
     if (live()) {
       tasksStopped(field(e, 'background_tasks'))
       void pump($)
@@ -1559,7 +1483,6 @@ export function installKeepalive(on: On, enabled: () => boolean): void {
   // The end goes out past a request in flight: every session.end hook shares one short budget, and the lease
   // covers whatever this one request does not reach.
   on('session.end', async ($, e, next) => {
-    if (!enabled()) return next(e)
     if (active() && settings !== undefined && session !== undefined && !session.stopped) {
       const config = settings
       const record = session

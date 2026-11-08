@@ -1,22 +1,13 @@
 import type { Register } from 'claude-code'
 import { answerCall, errorAnswer, startCheck, TOOL_CALL } from './allowance.ts'
-import {
-  clearSettings,
-  emptyQueue,
-  installKeepalive,
-  MINIMUM_VERSION,
-  redactSecrets,
-  resolveSettings,
-  startKeepalive,
-  versionAtLeast,
-} from './keepalive.ts'
-import type { Resolution, Settings } from './keepalive.ts'
-import { optionsOf, urlProblem } from './settings.ts'
+import { clearSettings, emptyQueue, installKeepalive, MINIMUM_VERSION, startKeepalive } from './keepalive.ts'
+import { optionsOf, PREFIX, redactSecrets, resolveSettings, urlProblem, versionAtLeast } from './settings.ts'
+import type { Resolution, Settings } from './settings.ts'
 
 const MISSING: Record<Extract<Resolution, { missing: unknown }>['missing'], string> = {
-  no_token: 'phoebis-companion: no router key from the option or the environment',
-  no_url: 'phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL',
-  token_without_url: 'phoebis-companion: the token setting needs the Management URL, so this session reports nothing',
+  no_token: `${PREFIX}no router key from the option or the environment`,
+  no_url: `${PREFIX}no management URL from the option or ANTHROPIC_BASE_URL`,
+  token_without_url: `${PREFIX}the token setting needs the Management URL, so this session reports nothing`,
 }
 
 const UNCONFIGURED = 'no router URL or key resolved at this session start, so the allowance is unknown'
@@ -25,8 +16,10 @@ export const register: Register = (on, options) => {
   // The URL and key the last session.start resolved, which the tool reads under. A registered tool outlives a start
   // that resolves nothing, so a call after one answers an error rather than the earlier configuration's router.
   let current: Settings | undefined
+  // The options hold for the activation: a change reloads the plugin and runs register again.
+  const config = optionsOf(options)
 
-  installKeepalive(on, () => optionsOf(options).keepalive)
+  if (config.keepalive) installKeepalive(on)
 
   on('tool.call', { tool: TOOL_CALL }, async ($) => {
     if (current === undefined) return errorAnswer(UNCONFIGURED)
@@ -47,14 +40,10 @@ export const register: Register = (on, options) => {
   on('config.set', { key: 'phoebis-companion.token' }, (_$, e, next) =>
     next(typeof e.value === 'string' ? { ...e, value: e.value.trim() } : e))
 
-  // Every row shows as the manifest declares it, and this is the seat for a row a later version describes.
-  on('config.describe', (_$, e, next) => next(e))
-
   on('session.start', async ($, e, next) => {
     const { version, base } = await $.session.version()
     const client = base ?? version
     if (!versionAtLeast(client, MINIMUM_VERSION)) return next(e)
-    const config = optionsOf(options)
     const [baseUrl, authToken, apiKey, oauthToken] = await Promise.all([
       $.env.get('ANTHROPIC_BASE_URL'),
       $.env.get('ANTHROPIC_AUTH_TOKEN'),

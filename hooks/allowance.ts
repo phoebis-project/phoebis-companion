@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
-import { redactSecrets, versionAtLeast } from './keepalive.ts'
-import type { Settings } from './keepalive.ts'
+import { bearer, errorText, parsed, PREFIX, redactSecrets, versionAtLeast } from './settings.ts'
+import type { Settings } from './settings.ts'
 
 // The start check and the allowance tool: one GET of the allowance route at session start settles whether a router
 // answers at the URL, whether the key is valid and whether the key may read the allowance, and the tool answers the
@@ -51,40 +51,25 @@ type StartOutcome = 'register' | 'not_permitted' | 'refused' | 'unreachable'
 
 type ToolAnswer = { result: { content: { type: 'text'; text: string }[]; isError?: true } }
 
-const PREFIX = 'phoebis-companion: '
 const NOT_PERMITTED = `${PREFIX}this key may not read the allowance`
 
 // The entry names its session, since a /clear starts a new session id with no session.start to clear the cache.
 let cache: { at: number; sessionId: string; text: string } | undefined
-
-function parsed(text: string): Record<string, unknown> {
-  try {
-    const value: unknown = JSON.parse(text)
-    const object = typeof value === 'object' && value !== null && !Array.isArray(value)
-    return object ? (value as Record<string, unknown>) : {}
-  } catch {
-    return {}
-  }
-}
 
 /** True for a text that parses as a JSON object with `protocol: 1`, which is what the allowance route answers. */
 function isAllowance(text: string): boolean {
   return parsed(text).protocol === 1
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
 /** One GET of the allowance, the failure text for a transport error. */
 async function fetchAllowance($: EngineInterface, settings: Settings, sessionId: string): Promise<Fetched> {
   const url = `${settings.url}${ALLOWANCE_PATH}?session_id=${encodeURIComponent(sessionId)}`
   try {
-    const response = await $.http.fetch(url, { headers: { Authorization: `Bearer ${settings.key}` } })
+    const response = await $.http.fetch(url, { headers: bearer(settings.key) })
     return { status: response.status, text: response.text }
   } catch (error) {
     // The host's message may quote the request, bearer included.
-    return { failure: redactSecrets(message(error), settings.key) }
+    return { failure: redactSecrets(errorText(error), settings.key) }
   }
 }
 
@@ -157,7 +142,7 @@ async function registerTool($: EngineInterface, client: string): Promise<void> {
     })
   } catch (error) {
     // A registration the engine refuses costs the tool alone, never the keepalive start that follows it.
-    $.ui.log(`${PREFIX}the allowance tool could not be registered (${message(error)})`, { to: 'debug' })
+    $.ui.log(`${PREFIX}the allowance tool could not be registered (${errorText(error)})`, { to: 'debug' })
   }
 }
 
