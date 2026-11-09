@@ -695,8 +695,12 @@ async function pump($: EngineInterface): Promise<void> {
       queue.inFlight = undefined
     }
     // A /clear or a /resume replaced the session while the request was out, so the answer speaks for a session
-    // the mod no longer reports.
-    if (record === session && !record.stopped && !refused) settle($, record, report, response, now, listed)
+    // the mod no longer reports. A start that cleared or replaced the settings meanwhile abandoned the report with
+    // them, so its answer restores and schedules nothing. The registration a later start queues with its own
+    // settings schedules the heartbeat again.
+    if (record === session && !record.stopped && !refused && settings === config) {
+      settle($, record, report, response, now, listed)
+    }
   } catch {
     return
   }

@@ -782,6 +782,30 @@ test('a start whose check registers the tool after a refused key resumes under t
     expect(router.headers.slice(1).map((headers) => headers.Authorization)).toEqual(['Bearer K2', 'Bearer K2'])
   })
 
+test('a report on the wire at a deactivation does not come back', CONFIGURED, async ($, on) => {
+  const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])
+  on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+  const clock = mock.clock(on, { now: T0 })
+  const router = fakeRouter(on, clock)
+  await start($, clock)
+  // The heartbeat's answer is held a second, so the start with no key runs while the heartbeat is out.
+  router.answer(async () => {
+    await clock.sleep(1000)
+    return { status: 503 }
+  })
+  await clock.advance(25000)
+  expect(events(router)).toEqual(['session_start', 'heartbeat'])
+  variables.delete('ANTHROPIC_AUTH_TOKEN')
+  await start($, clock)
+  await clock.advance(1000)
+  // The fake answers the start's GET 200 by default, so the check passes under the key put back.
+  variables.set('ANTHROPIC_AUTH_TOKEN', KEY)
+  await start($, clock)
+  // Past the backoff a restored heartbeat would wait, and short of the heartbeat the registration's answer schedules.
+  await clock.advance(5000)
+  expect(events(router).slice(2)).toEqual(['session_start'])
+})
+
 test('a start under a new id never registers the old id a pump finds first', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on)
   router.answer(() => ({ status: 401 }))
