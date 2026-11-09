@@ -829,6 +829,22 @@ test('a report on the wire at a key change does not refuse the new key', CONFIGU
   expect(router.headers.slice(2).map((headers) => headers.Authorization)).toEqual(['Bearer K2'])
 })
 
+test('a report on the wire at a start with the same values is settled', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  // The prompt's answer is held a second, so a reload's start under the same URL and key runs while it is out.
+  router.answer(async () => {
+    await clock.sleep(1000)
+    return { status: 503 }
+  })
+  await prompt($, clock)
+  expect(events(router)).toEqual(['session_start', 'activity'])
+  await start($, clock)
+  // Past the hold and the one-second backoff, and short of the heartbeat the registration's answer schedules.
+  await clock.advance(5000)
+  expect(events(router).slice(2)).toEqual(['session_start', 'activity'])
+})
+
 test('a prompt whose chain finishes while the settings are cleared queues nothing for the next start', CONFIGURED,
   async ($, on) => {
     const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])

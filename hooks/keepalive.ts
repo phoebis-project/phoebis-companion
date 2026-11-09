@@ -697,11 +697,13 @@ async function pump($: EngineInterface): Promise<void> {
       queue.inFlight = undefined
     }
     // A /clear or a /resume replaced the session while the request was out, so the answer speaks for a session
-    // the mod no longer reports. A start that cleared or replaced the settings meanwhile abandoned the report with
-    // them, so its answer restores, schedules or refuses nothing. The registration a later start queues with its own
-    // settings schedules the heartbeat again.
+    // the mod no longer reports. A start that cleared the settings or set other values meanwhile abandoned the report
+    // with them, so its answer restores, schedules or refuses nothing, while a start with the same values, such as a
+    // reload, keeps it. The registration a later start queues with its own settings schedules the heartbeat again.
     const still = reporting()
-    if (still?.record === record && still.config === config) settle($, record, report, response, now, listed)
+    if (still?.record === record && still.config.url === config.url && still.config.key === config.key) {
+      settle($, record, report, response, now, listed)
+    }
   } catch {
     return
   }
