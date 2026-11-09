@@ -105,8 +105,10 @@ let startRefusal: unknown
 let session: SessionRecord | undefined
 const queue: Queue = { reports: [], attempt: 0, deferred: new Map() }
 let timer: Timer | undefined
+type RefusalHandler = (status: number, under: Settings) => void
+
 // The start hook holds the settings the allowance tool reads under, so it decides what a refusal does to them.
-let onRefused: (status: number, under: Settings) => void = () => undefined
+let onRefused: RefusalHandler = () => undefined
 // The tracked work as the host last took it, so a pump writes it only when it changed.
 let savedModel: string | undefined
 // The reports already sent again under a generation the router named, so a second refusal drops them.
@@ -1089,7 +1091,7 @@ export function clearSettings(): void {
   settings = undefined
 }
 
-export function installKeepalive(on: On, refused: (status: number, under: Settings) => void): void {
+export function installKeepalive(on: On, refused: RefusalHandler): void {
   onRefused = refused
   on('prompt.submit', async ($, e, next) => {
     if (!active()) return next(e)
