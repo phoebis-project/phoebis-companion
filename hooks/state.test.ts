@@ -781,6 +781,24 @@ test('a registration answer that parks main with no park is corrected by a state
   expect(told(router).slice(settled)).toEqual(['session_start', `state main parked background ${T0 + 1800000}`])
 })
 
+test('a registration answer with the same scheduled park sends nothing', CONFIGURED, async ($, on) => {
+  const at = local(14, 10, 0)
+  const { clock, router } = host(on, at)
+  await start($, clock)
+  await submit($, clock, 'composer')
+  await call($, clock, router, { tool: 'ScheduleWakeup', delaySeconds: 90, reason: 'the build runs', prompt: 'go on' },
+    { scheduledFor: at + 90000, clampedDelaySeconds: 90, wasClamped: false })
+  await complete($, clock)
+  router.answer(() => ({ status: 409, body: { code: 'unknown_instance' } }))
+  router.answer((_body, ack) => ok({
+    ...ack,
+    agents: [{ agent_id: 'main', state: 'parked', park_kind: 'scheduled', wake_at: at + 90000, request_generation: 1 }],
+  }))
+  const settled = told(router).length
+  await clock.advance(25000)
+  expect(told(router).slice(settled)).toEqual(['session_start'])
+})
+
 test('an answer that omits a parked subagent the router last named released leaves it unannounced until its next ' +
   'turn', CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
