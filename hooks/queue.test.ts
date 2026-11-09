@@ -775,11 +775,12 @@ test('the key appears in the Authorization header and nowhere else', CONFIGURED,
   expect(JSON.stringify(router.logs)).not.toContain(KEY)
 })
 
-describe('a key the router refuses stops reporting until a start\'s check no longer refuses it, with one debug ' +
+describe('a refused report stops the reporting until a start\'s check no longer refuses the key, with one debug ' +
   'line naming the status', () => {
+  // The router answers this route no 403 of its own, so the 403 body is one a proxy in front of it answers.
   const refusals = [
     [401, 'authentication_error', 'the presented key is not valid'],
-    [403, 'permission_error', 'the presented key may not report sessions'],
+    [403, 'permission_error', 'the request is not allowed'],
   ] as const
   for (const [status, type, message] of refusals) {
     test(`${status} ${type}`, CONFIGURED, async ($, on) => {
