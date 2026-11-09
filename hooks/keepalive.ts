@@ -1,5 +1,5 @@
 import type { AgentInfo, EngineInterface, HttpResponse, On, Timer } from 'claude-code'
-import type { Identity, SavedAgent, SavedModel } from '../types/index.d.ts'
+import type { Identity, SavedAgent, SavedModel, SavedTask } from '../types/index.d.ts'
 import {
   agentOf,
   collapse,
@@ -248,6 +248,16 @@ function change(agent: AgentRecord, edit: () => void): void {
   if (!samePark(before, after)) rest(agent)
 }
 
+// Inside one park change, so a subagent whose last commands end together goes straight to its release. A park
+// reported between two removals would announce anew an agent the router already released.
+function dropCommands(owner: AgentRecord, drop: (task: SavedTask) => boolean): void {
+  change(owner, () => {
+    for (const task of [...owner.open.values()]) {
+      if (task.kind === 'command' && drop(task)) owner.open.delete(task.id)
+    }
+  })
+}
+
 function release(agentId: string): void {
   if (agentId === MAIN) return
   const known = model.agents.delete(agentId)
@@ -314,11 +324,7 @@ function tasksStopped($: EngineInterface, e: unknown): void {
       const status = field(entry, 'status')
       if (typeof id === 'string' && typeof status === 'string' && LIVE_TASK.has(status)) running.add(id)
     }
-    for (const owner of [...model.agents.values()]) {
-      for (const task of [...owner.open.values()]) {
-        if (task.kind === 'command' && !running.has(task.id)) change(owner, () => owner.open.delete(task.id))
-      }
-    }
+    for (const owner of [...model.agents.values()]) dropCommands(owner, (task) => !running.has(task.id))
   }
   void pump($)
 }
@@ -459,11 +465,7 @@ async function reconcile($: EngineInterface): Promise<void> {
   }
   // A command is stopped at its deadline, so the first tick past it closes the task when no notification did.
   for (const owner of [...model.agents.values()]) {
-    change(owner, () => {
-      for (const task of [...owner.open.values()]) {
-        if (task.kind === 'command' && task.deadline !== undefined && task.deadline <= now) owner.open.delete(task.id)
-      }
-    })
+    dropCommands(owner, (task) => task.deadline !== undefined && task.deadline <= now)
   }
 }
 
@@ -1076,9 +1078,7 @@ export function installKeepalive(on: On): void {
       // long-running one such as a dev server parks main only until then. A prompt typed into the running turn keeps
       // the commands that turn started, since they are seconds old.
       const keep = e.turnId === undefined ? new Set<string>() : model.current
-      for (const task of [...main.open.values()]) {
-        if (task.kind === 'command' && !keep.has(task.id)) main.open.delete(task.id)
-      }
+      dropCommands(main, (task) => !keep.has(task.id))
       void pump($)
     }
     return r

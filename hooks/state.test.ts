@@ -1196,13 +1196,14 @@ test('a start answered after the agent\'s release leaves it unannounced, so its 
     expect(router.refusals).toEqual([])
   })
 
-// Main parked on a subagent that parks on its own command, then a registration whose answer names the subagent
+// Main parked on a subagent that parks on its own commands, then a registration whose answer names the subagent
 // released, as the router does once the park's ceiling released it.
-async function releasedByRouter($: Engine, clock: MockClock, router: FakeRouter): Promise<void> {
+async function releasedByRouter($: Engine, clock: MockClock, router: FakeRouter,
+  commands = [bash('bg-3')]): Promise<void> {
   await start($, clock)
   await submit($, clock, 'composer')
   await spawn($, clock)
-  await call($, clock, router, { ...bash('bg-3')[0], agentId: 'agent-1' }, bash('bg-3')[1])
+  for (const [input, result] of commands) await call($, clock, router, { ...input, agentId: 'agent-1' }, result)
   router.setAgents([{ id: 'agent-1', status: 'waiting' }])
   await complete($, clock, 'agent-1')
   await complete($, clock)
@@ -1292,6 +1293,16 @@ test('the end of the open work of a subagent the router last named released drop
       released: ['agent-1'],
       routerReleased: [],
     })
+  })
+
+test('one stop event that ends two commands of a released subagent reports main\'s idle alone', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    // The command the stop removes first holds the later deadline, so its removal alone would move the park.
+    await releasedByRouter($, clock, router, [bash('bg-3'), bash('bg-4', 60000)])
+    const settled = told(router).length
+    await stop($, clock, [{ id: 'agent-1', type: 'subagent', status: 'running' }])
+    expect(told(router).slice(settled)).toEqual(['state main idle'])
   })
 
 test('a registration answered while the agent\'s release waits does not adopt it again from the client\'s list',
