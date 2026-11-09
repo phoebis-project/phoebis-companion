@@ -485,7 +485,7 @@ function reconcileAck(entries: AnsweredAgent[], listed: AgentInfo[] | undefined)
     if (state === 'released') continue
     const agent = model.agents.get(id)
     if (agent !== undefined) {
-      // The router can keep a subagent parked after it cleared the park, and then lists it with no park kind.
+      // The router lists a parked agent with no park kind once it no longer holds its park.
       const differs = state === 'parked' && agent.state === 'parked'
         ? park === undefined || !samePark(parkOf(agent, cronsOf(agent)), park)
         : state !== agent.state
