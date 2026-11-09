@@ -1026,7 +1026,7 @@ async function keepPair($: EngineInterface, pairs: StoredPair[], processId: stri
 // The owner the router fences this process's requests by. A reload of the module, an enable or a worker respawn in
 // the same process keeps the pair under any session id of the process, so the router's session keeps its owner, and
 // any other process mints its own.
-async function fence($: EngineInterface, current: () => boolean): Promise<Identity> {
+async function fence($: EngineInterface, isCurrent: () => boolean): Promise<Identity> {
   const [existing, variable, { value: held }] = await Promise.all([
     $.env.get('ANTHROPIC_CUSTOM_HEADERS'),
     $.env.get('PHOEBIS_KEEPALIVE_INSTANCE'),
@@ -1047,12 +1047,12 @@ async function fence($: EngineInterface, current: () => boolean): Promise<Identi
       : { instance: crypto.randomUUID(), owner: crypto.randomUUID() }
     // A later start owns the identity the relay must read, so each write goes out only while this start is current,
     // checked in the step that issues it.
-    if (current()) await $.state.set(IDENTITY_REF, pair)
+    if (isCurrent()) await $.state.set(IDENTITY_REF, pair)
   }
-  if (processId !== undefined && current()) await keepPair($, pairs, processId, pair)
+  if (processId !== undefined && isCurrent()) await keepPair($, pairs, processId, pair)
   // The owner line replaces any line before it, so the relay reads one owner whatever the variable inherited.
-  if (current()) await $.env.set('ANTHROPIC_CUSTOM_HEADERS', ownerHeaderLines(existing, pair.owner))
-  if (current()) await $.env.set('PHOEBIS_KEEPALIVE_INSTANCE', pair.instance)
+  if (isCurrent()) await $.env.set('ANTHROPIC_CUSTOM_HEADERS', ownerHeaderLines(existing, pair.owner))
+  if (isCurrent()) await $.env.set('PHOEBIS_KEEPALIVE_INSTANCE', pair.instance)
   return pair
 }
 
