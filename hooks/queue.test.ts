@@ -645,12 +645,13 @@ describe('session end is sent at once ahead of the queue and past the request in
 describe('the mod sends nothing without a url, without a key and on a client older than 2.1.287', () => {
   const loads = [
     ['without a url', {}, {}, '2.1.292',
-      [{ text: 'phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL', to: 'transcript' }]],
+      'phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL'],
     ['without a key', CONFIGURED.options, {}, '2.1.292',
-      [{ text: 'phoebis-companion: no router key from the option or the environment', to: 'transcript' }]],
-    ['on 2.1.286', CONFIGURED.options, { ANTHROPIC_AUTH_TOKEN: KEY }, '2.1.286', []],
+      'phoebis-companion: no router key from the option or the environment'],
+    ['on 2.1.286', CONFIGURED.options, { ANTHROPIC_AUTH_TOKEN: KEY }, '2.1.286',
+      'phoebis-companion: Claude Code 2.1.286 is older than 2.1.287, so the mod does nothing'],
   ] as const
-  for (const [name, options, variables, version, logs] of loads) {
+  for (const [name, options, variables, version, line] of loads) {
     test(name, { options }, async ($, on) => {
       mock.env(on, variables)
       const clock = mock.clock(on, { now: T0 })
@@ -660,7 +661,8 @@ describe('the mod sends nothing without a url, without a key and on a client old
       await clock.advance(60000)
       await end($, clock, 'other', 'session-a')
       expect(router.reached.filter((op) => ['http.fetch', 'env.set'].includes(op))).toEqual([])
-      expect(router.logs).toEqual(logs)
+      expect(router.logs).toEqual([{ text: line, to: 'transcript' }])
+      expect(router.toasts).toEqual([line])
     })
   }
 })

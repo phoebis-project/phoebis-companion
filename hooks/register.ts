@@ -68,7 +68,13 @@ export const register: Register = (on, options) => {
     try {
       const { version, base } = await $.session.version()
       const client = base ?? version
-      if (!versionAtLeast(client, MINIMUM_VERSION)) return next(e)
+      if (!versionAtLeast(client, MINIMUM_VERSION)) {
+        const floor = MINIMUM_VERSION.join('.')
+        const line = `${PREFIX}Claude Code ${client} is older than ${floor}, so the mod does nothing`
+        $.ui.log(line)
+        if (config.notifications) $.ui.toast(line)
+        return next(e)
+      }
       const [baseUrl, authToken, apiKey, oauthToken] = await Promise.all([
         $.env.get('ANTHROPIC_BASE_URL'),
         $.env.get('ANTHROPIC_AUTH_TOKEN'),
