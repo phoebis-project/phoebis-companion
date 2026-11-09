@@ -608,15 +608,13 @@ async function persistModel($: EngineInterface): Promise<void> {
   await $.state.set(MODEL_REF, value)
 }
 
-async function ensureSession($: EngineInterface, revive: () => boolean, adopt = true): Promise<void> {
+async function ensureSession($: EngineInterface, revive: () => boolean): Promise<void> {
   const id = await $.session.id()
   // A record that ended under the current id is a conversation resumed after its end, which the router closed with
   // the session_end. Only a prompt or a current start shows the resume, so a tick leaves the record ended. The
   // question is asked at each decision, since a start can lose its currency while it waits.
   const kept = (): boolean => session?.id === id && !(session.stopped && revive())
-  // A tick finds a new id only when its read was out across a clear or a resume, and neither raises a start, so the
-  // tick leaves the new conversation to its first prompt.
-  if (kept() || !adopt || identity === undefined) return
+  if (kept() || identity === undefined) return
   // The same id in the same process is a reload of the module or a resume after its end, and the host still holds
   // its tracked work. A new id is a new conversation, so nothing the old one had open or scheduled carries over. Read
   // before the session moves, so a pump during the read never writes the old session's work under the new id.
@@ -950,7 +948,10 @@ function tick($: EngineInterface): void {
   void (async () => {
     try {
       if (!active()) return
-      await ensureSession($, () => false, false)
+      // A tick serves the record the host still holds. An id that is not the record's was read across a clear or a
+      // resume, and neither raises a start, so the tick leaves the new conversation to its first prompt.
+      const id = await $.session.id()
+      if (session?.id !== id) return
       // A failed reconcile must not cost the lease, so the heartbeat goes out either way.
       if (live()) await reconcile($).catch(() => undefined)
       // A heartbeat renews a lease the router granted, so a session still waiting for its registration sends none.
