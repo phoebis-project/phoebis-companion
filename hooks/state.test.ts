@@ -1513,7 +1513,7 @@ test('a prompt whose chain finishes after a clear changes nothing', CONFIGURED, 
   expect(under(router, 'session-b')).toEqual(['session_start', 'activity main prompt'])
 })
 
-test('a prompt whose chain finishes after a clear\'s start leaves the new session alone', CONFIGURED,
+test('a prompt whose chain finishes after a start under the new id leaves the new session alone', CONFIGURED,
   async ($, on) => {
     const { clock, router } = host(on)
     await start($, clock)
@@ -1525,7 +1525,8 @@ test('a prompt whose chain finishes after a clear\'s start leaves the new sessio
     await clock.settle()
     await end($, clock, 'clear', 'session-a')
     router.setId('session-b')
-    // The clear's own start registers the new id while the prompt is still held, so the session is live again.
+    // The clear itself raises no start. A later start, such as a reload, or a prompt typed under the new id builds
+    // the new record, and here a reload's start does so while the prompt is still held.
     await start($, clock)
     await clock.advance(2000)
     await held
