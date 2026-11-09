@@ -149,6 +149,11 @@ export type FakeRouter = {
   delayModel: (ms: number) => void
   /** Holds the fence's next read of the stored pairs (`$.store.get`) for this long on the clock before it answers. */
   delayStore: (ms: number) => void
+  /**
+   * Denies the next `$.env.set` of the owner header (`ANTHROPIC_CUSTOM_HEADERS`) with the reason, as another plugin's
+   * hook on the variable does, which rejects the call.
+   */
+  denyEnvSet: (reason: string) => void
   /** Denies the next `$.tool.register` with the reason, as an engine that refuses the spec does. */
   denyRegister: (reason: string) => void
   /** Denies the next `$.session.version()` with the reason, as a host that cannot read the client's version does. */
@@ -260,6 +265,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const spawns: (() => { agentId: string } | Promise<{ agentId: string }>)[] = []
   const edits: (() => PromptEditResult)[] = []
   const submits: (() => PromptSubmitResult | Promise<PromptSubmitResult>)[] = []
+  const envSetDenials: string[] = []
   const registerDenials: string[] = []
   const versionDenials: string[] = []
   let envSetDelayMs = 0
@@ -345,6 +351,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     delayStore: (ms) => {
       storeDelayMs = ms
+    },
+    denyEnvSet: (reason) => {
+      envSetDenials.push(reason)
     },
     denyRegister: (reason) => {
       registerDenials.push(reason)
@@ -453,6 +462,10 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   })
   on('env.set', async (_$, e) => {
     router.reached.push('env.set')
+    if (e.name === 'ANTHROPIC_CUSTOM_HEADERS') {
+      const denial = envSetDenials.shift()
+      if (denial !== undefined) return { deny: denial }
+    }
     if (e.name === 'ANTHROPIC_CUSTOM_HEADERS' && envSetDelayMs > 0) {
       const ms = envSetDelayMs
       envSetDelayMs = 0

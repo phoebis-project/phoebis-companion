@@ -271,6 +271,20 @@ test('a replaced start\'s header write that the host lands late comes before the
     ])
   })
 
+test('a fence whose write the host refuses leaves the next start\'s fence to run', CONFIGURED, async ($, on) => {
+  const { clock, router } = processHost(on, { ANTHROPIC_AUTH_TOKEN: KEY }, { process: PROCESS })
+  // Another plugin's hook on the variable refuses the first start's header write, and a hook's own deny rejects the
+  // call where the engine's hold would resolve.
+  router.denyEnvSet('another plugin holds the variable')
+  await start($, clock)
+  await start($, clock)
+  const registration = nth(registrations(router), 0)
+  expect(router.envWrites.slice(-2)).toEqual([
+    { name: HEADERS, value: `X-Keepalive-Owner-Id: ${ownerOfBody(registration)}` },
+    { name: INSTANCE, value: registration.instance_id },
+  ])
+})
+
 test('a child process mints its own pair beside the one the store keeps for its parent', CONFIGURED,
   async ($, on) => {
     const { clock, router } = processHost(on, INHERITED, { process: CHILD, store: { identities: [[PROCESS, HELD]] } })
