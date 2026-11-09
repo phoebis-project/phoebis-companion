@@ -26,9 +26,9 @@ Inside Claude Code:
 ```
 
 From a shell, `claude plugin marketplace add` and `claude plugin install` take the same arguments. The mod needs Claude
-Code 2.1.287 or later, and on an older client it does nothing. The `allowance` tool needs 2.1.293 or later: on a client
-between the two versions the mod reports and runs its start check, and writes one line to Claude Code's debug log in
-place of registering the tool.
+Code 2.1.287 or later, and on an older client it writes one transcript line and does nothing more. The `allowance` tool
+needs 2.1.293 or later: on a client between the two versions the mod reports and runs its start check, and writes one
+line to Claude Code's debug log in place of registering the tool.
 
 ## Settings
 

@@ -411,9 +411,9 @@ test('a bare instance_conflict keeps the session live and retries the start unde
     expect(router.times.slice(0, 9)).toEqual([0, 1000, 3000, 7000, 15000, 31000, 61000, 91000, 91000]
       .map((at) => T0 + at))
     expect(router.logs).toEqual([
-      { text: 'another instance reports session session-a, so the start is retried once its lease lapses',
-        to: 'transcript' },
-      { text: 'took over session session-a from a silent instance', to: 'transcript' },
+      { text: 'phoebis-companion: another instance reports session session-a, so the start is retried once its ' +
+        'lease lapses', to: 'transcript' },
+      { text: 'phoebis-companion: took over session session-a from a silent instance', to: 'transcript' },
     ])
     await prompt($, clock)
     expect(events(router).slice(-1)).toEqual(['activity'])
@@ -704,9 +704,10 @@ test('a report the router refuses with a 400 or a 413 is dropped with one debug 
   await clock.advance(5000)
   expect(events(router)).toEqual(['session_start', 'activity', 'activity'])
   expect(router.logs).toEqual([
-    { text: 'the router answered status 400 with code invalid_event to the activity report, so the mod drops it',
-      to: 'debug' },
-    { text: 'the router answered status 413 with no code to the activity report, so the mod drops it', to: 'debug' },
+    { text: 'phoebis-companion: the router answered status 400 with code invalid_event to the activity report, so ' +
+      'the mod drops it', to: 'debug' },
+    { text: 'phoebis-companion: the router answered status 413 with no code to the activity report, so the mod ' +
+      'drops it', to: 'debug' },
   ])
 })
 
@@ -755,7 +756,8 @@ describe('a key the router refuses stops the mod for the process with one debug 
       expect(router.logs).toHaveLength(1)
       const line = nth(router.logs, 0)
       expect(line.to).toBe('debug')
-      expect(line.text).toContain(String(status))
+      expect(line.text).toBe(`phoebis-companion: the router refused the key with status ${status}, so this process ` +
+        'reports nothing until a start\'s check accepts the key')
       expect(line.text).not.toContain(KEY)
     })
   }

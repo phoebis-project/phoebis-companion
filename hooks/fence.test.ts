@@ -225,8 +225,8 @@ test('a reload under a later session id of the same process reuses the pair the 
     await start($, clock)
     expect(router.commands).toEqual([['sh', '-c', 'echo $PPID']])
     expect(router.logs).toEqual([
-      { text: `the client process reads as ${PROCESS}, which keys the pair the mod reuses across a clear`,
-        to: 'debug' },
+      { text: `phoebis-companion: the client process reads as ${PROCESS}, which keys the pair the mod reuses across ` +
+        'a clear', to: 'debug' },
     ])
     keptInStore(router, PROCESS)
   })
