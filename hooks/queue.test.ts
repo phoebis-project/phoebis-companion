@@ -845,22 +845,25 @@ test('a report on the wire at a start with the same values is settled', CONFIGUR
   expect(events(router).slice(2)).toEqual(['session_start', 'activity'])
 })
 
-test('a refusal that lands after a start with the same values does not silence the session', CONFIGURED,
-  async ($, on) => {
-    const { clock, router } = host(on)
-    await start($, clock)
-    // The prompt's refusal is held a second, so it lands after a reload's start passed its check under the same key.
-    router.answer(async () => {
-      await clock.sleep(1000)
-      return { status: 401 }
+describe('a refusal that lands after a start with the same values does not silence the session', () => {
+  for (const status of [401, 403] as const) {
+    test(String(status), CONFIGURED, async ($, on) => {
+      const { clock, router } = host(on)
+      await start($, clock)
+      // The prompt's refusal is held a second, so it lands after a reload's start installed the same values again.
+      router.answer(async () => {
+        await clock.sleep(1000)
+        return { status }
+      })
+      await prompt($, clock)
+      expect(events(router)).toEqual(['session_start', 'activity'])
+      await start($, clock)
+      // Past the hold, and short of the heartbeat the registration's answer schedules.
+      await clock.advance(5000)
+      expect(events(router).slice(2)).toEqual(['session_start'])
     })
-    await prompt($, clock)
-    expect(events(router)).toEqual(['session_start', 'activity'])
-    await start($, clock)
-    // Past the hold, and short of the heartbeat the registration's answer schedules.
-    await clock.advance(5000)
-    expect(events(router).slice(2)).toEqual(['session_start'])
-  })
+  }
+})
 
 test('a prompt whose chain finishes while the settings are cleared queues nothing for the next start', CONFIGURED,
   async ($, on) => {
