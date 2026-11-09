@@ -475,17 +475,21 @@ function restate(agent: AgentRecord): void {
 }
 
 // The registration's answer names every agent the router holds. Each side learns what the other lacks: an agent
-// only the router holds is rebuilt from the client's list or released, a state the router holds wrongly is sent
-// again, and an agent only the mod holds is announced with its state.
+// only the router holds is rebuilt from the client's list or released, a state or a park the router holds wrongly
+// is sent again, and an agent only the mod holds is announced with its state.
 function reconcileAck(entries: AnsweredAgent[], listed: AgentInfo[] | undefined): void {
-  const held = new Map(entries.map((entry) => [entry.agent_id, entry.state]))
+  const held = new Map(entries.map((entry) => [entry.agent_id, entry]))
   const client = listed === undefined ? undefined : new Map(listed.map((agent) => [agent.id, agent]))
   const live: AgentInfo[] = []
-  for (const [id, state] of held) {
+  for (const [id, { state, park }] of held) {
     if (state === 'released') continue
     const agent = model.agents.get(id)
     if (agent !== undefined) {
-      if (state !== agent.state) restate(agent)
+      // The router can keep a subagent parked after it cleared the park, and then lists it with no park kind.
+      const differs = state === 'parked' && agent.state === 'parked'
+        ? park === undefined || !samePark(parkOf(agent, cronsOf(agent)), park)
+        : state !== agent.state
+      if (differs) restate(agent)
       continue
     }
     // The answer names the run this mod released. The release ends it on the router, so the agent is not adopted
@@ -712,7 +716,7 @@ export function emptyQueue(): void {
   queue.reports = []
 }
 
-type AnsweredAgent = { agent_id: string; state: unknown; request_generation?: number }
+type AnsweredAgent = { agent_id: string; state: unknown; request_generation?: number; park?: Park }
 
 type Answer = {
   code?: string
@@ -721,6 +725,17 @@ type Answer = {
   agent_id?: string
   instance_id?: string
   agents?: AnsweredAgent[]
+}
+
+function answeredPark(entry: unknown): Park | undefined {
+  const kind = field(entry, 'park_kind')
+  if (kind !== 'background' && kind !== 'scheduled' && kind !== 'both') return undefined
+  const park: Park = { state: 'parked', park_kind: kind }
+  const wakeAt = field(entry, 'wake_at')
+  if (typeof wakeAt === 'number') park.wake_at = wakeAt
+  const deadline = field(entry, 'deadline')
+  if (typeof deadline === 'number') park.deadline = deadline
+  return park
 }
 
 // An agents entry is kept with a string agent_id alone: the generations skip one without a number, but the
@@ -741,6 +756,8 @@ function answerOf(text: string): Answer {
       const agent: AnsweredAgent = { agent_id: id, state: field(entry, 'state') }
       const generation = field(entry, 'request_generation')
       if (typeof generation === 'number') agent.request_generation = generation
+      const park = answeredPark(entry)
+      if (park !== undefined) agent.park = park
       answer.agents.push(agent)
     }
   }

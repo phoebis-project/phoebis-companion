@@ -732,6 +732,42 @@ test('the registration acknowledgment reconciles the mod\'s agents against the r
     expect(told(router).slice(settled + 6)).toEqual([])
   })
 
+test('a registration answer with a stale park is corrected by a state report', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  await submit($, clock, 'composer')
+  await call($, clock, router, ...bash('bg-1'))
+  await complete($, clock)
+  router.answer(() => ({ status: 409, body: { code: 'unknown_instance' } }))
+  router.answer((_body, ack) => ok({
+    ...ack,
+    agents: [
+      { agent_id: 'main', state: 'parked', park_kind: 'background', deadline: T0 + 1740000, request_generation: 1 },
+    ],
+  }))
+  const settled = told(router).length
+  await clock.advance(25000)
+  expect(told(router).slice(settled)).toEqual(['session_start', `state main parked background ${T0 + 1800000}`])
+})
+
+test('a registration answer with the same park sends nothing', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  await submit($, clock, 'composer')
+  await call($, clock, router, ...bash('bg-1'))
+  await complete($, clock)
+  router.answer(() => ({ status: 409, body: { code: 'unknown_instance' } }))
+  router.answer((_body, ack) => ok({
+    ...ack,
+    agents: [
+      { agent_id: 'main', state: 'parked', park_kind: 'background', deadline: T0 + 1800000, request_generation: 1 },
+    ],
+  }))
+  const settled = told(router).length
+  await clock.advance(25000)
+  expect(told(router).slice(settled)).toEqual(['session_start'])
+})
+
 test('an answer that omits a parked subagent the router last named released leaves it unannounced until its next ' +
   'turn', CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
@@ -741,7 +777,7 @@ test('an answer that omits a parked subagent the router last named released leav
     router.answer(() => ({ status: 409, body: { code: 'unknown_instance' } }))
     router.answer((_body, ack) => ok({
       ...ack,
-      agents: [{ agent_id: 'main', state: 'parked', request_generation: 1 }],
+      agents: [{ agent_id: 'main', state: 'parked', park_kind: 'background', request_generation: 1 }],
     }))
     await clock.advance(25000)
     expect(told(router).slice(settled)).toEqual(['session_start'])
@@ -764,7 +800,7 @@ test('a start the router accepts after an answer named the subagent released aga
     router.answer((_body, ack) => ok({
       ...ack,
       agents: [
-        { agent_id: 'main', state: 'parked', request_generation: 1 },
+        { agent_id: 'main', state: 'parked', park_kind: 'background', request_generation: 1 },
         { agent_id: 'agent-1', state: 'released', request_generation: 2 },
       ],
     }))
@@ -1245,7 +1281,7 @@ test('a reload keeps a subagent the router last named released unannounced when 
     router.setAgents([{ id: 'agent-1', status: 'waiting' }])
     router.answer((_body, ack) => ok({
       ...ack,
-      agents: [{ agent_id: 'main', state: 'parked', request_generation: 1 }],
+      agents: [{ agent_id: 'main', state: 'parked', park_kind: 'background', request_generation: 1 }],
     }))
     await start($, clock)
     expect(told(router)).toEqual(['session_start'])
@@ -1836,7 +1872,12 @@ test('a reload in the same session restores the tracked work before the registra
     routerReleased: [],
   }
   const { clock, router } = reloaded(on, saved)
-  router.answer((_body, ack) => ok({ ...ack, agents: [{ agent_id: 'main', state: 'parked', request_generation: 1 }] }))
+  router.answer((_body, ack) => ok({
+    ...ack,
+    agents: [
+      { agent_id: 'main', state: 'parked', park_kind: 'background', deadline: T0 + 60000, request_generation: 1 },
+    ],
+  }))
   await start($, clock)
   expect(told(router)).toEqual(['session_start'])
   // The restored open set is what the registry closes, so main rests idle.
