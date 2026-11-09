@@ -697,11 +697,14 @@ async function pump($: EngineInterface): Promise<void> {
     // A /clear or a /resume replaced the session while the request was out, so the answer speaks for a session
     // the mod no longer reports. A start that cleared the settings or set other values meanwhile abandoned the report
     // with them, so its answer restores, schedules or refuses nothing, while a start with the same values, such as a
-    // reload, keeps it. The registration a later start queues with its own settings schedules the heartbeat again.
+    // reload, keeps it. A 401 or 403 under such a start answers a request sent before the start's check, which the
+    // router passed under this key, so the refusal drops and the registration the start queued asks again. The
+    // registration a later start queues with its own settings schedules the heartbeat again.
     const still = reporting()
-    if (still?.record === record && still.config.url === config.url && still.config.key === config.key) {
-      settle($, record, report, response, now, listed)
-    }
+    const kept = still?.record === record && still.config.url === config.url && still.config.key === config.key
+    const stale = still?.config !== config && response !== undefined &&
+      (response.status === 401 || response.status === 403)
+    if (kept && !stale) settle($, record, report, response, now, listed)
   } catch {
     return
   }
