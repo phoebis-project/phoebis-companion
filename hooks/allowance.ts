@@ -1,5 +1,5 @@
 import type { EngineInterface } from 'claude-code'
-import { bearer, errorText, parsed, PREFIX, redactSecrets, versionAtLeast } from './settings.ts'
+import { bearer, belowFloor, errorText, parsed, redactSecrets, say } from './settings.ts'
 import type { Settings } from './settings.ts'
 
 // The start check and the allowance tool: one GET of the allowance route at session start settles whether a router
@@ -51,7 +51,7 @@ type StartOutcome = 'register' | 'not_permitted' | 'refused' | 'stale' | 'unreac
 
 type ToolAnswer = { result: { content: { type: 'text'; text: string }[]; isError?: true } }
 
-const NOT_PERMITTED = `${PREFIX}this key may not read the allowance`
+const NOT_PERMITTED = 'this key may not read the allowance'
 
 // The entry names its session, since a /clear starts a new session id with no session.start to clear the cache.
 let cache: { at: number; sessionId: string; text: string } | undefined
@@ -131,9 +131,9 @@ export async function answerCall($: EngineInterface, settings: Settings, session
 }
 
 async function registerTool($: EngineInterface, client: string): Promise<void> {
-  if (!versionAtLeast(client, TOOL_MINIMUM_VERSION)) {
-    $.ui.log(`${PREFIX}Claude Code ${client} is older than ${TOOL_MINIMUM_VERSION.join('.')}, so the allowance tool ` +
-      'is not registered', { to: 'debug' })
+  const older = belowFloor(client, TOOL_MINIMUM_VERSION)
+  if (older !== undefined) {
+    say($, `${older}, so the allowance tool is not registered`, { to: 'debug' })
     return
   }
   try {
@@ -145,7 +145,7 @@ async function registerTool($: EngineInterface, client: string): Promise<void> {
     })
   } catch (error) {
     // A registration the engine refuses costs the tool alone, never the keepalive start that follows it.
-    $.ui.log(`${PREFIX}the allowance tool could not be registered (${errorText(error)})`, { to: 'debug' })
+    say($, `the allowance tool could not be registered (${errorText(error)})`, { to: 'debug' })
   }
 }
 
@@ -160,7 +160,7 @@ export function retireStarts(): void {
  * overtook answers `stale` and does nothing after the GET.
  */
 export async function startCheck($: EngineInterface, settings: Settings, sessionId: string, client: string,
-  notifications: boolean): Promise<StartOutcome> {
+  tell: (line: string) => void): Promise<StartOutcome> {
   // A reload under a changed URL or key must never answer the earlier configuration's body.
   retireStarts()
   const sent = generation
@@ -171,14 +171,13 @@ export async function startCheck($: EngineInterface, settings: Settings, session
   const body = allowanceOf(fetched)
   const outcome = outcomeOf(fetched, body)
   if (body !== undefined) cache = { at: now, sessionId, text: body }
-  if (outcome === 'not_permitted') $.ui.log(NOT_PERMITTED, { to: 'debug' })
+  if (outcome === 'not_permitted') say($, NOT_PERMITTED, { to: 'debug' })
   if (outcome === 'refused' || outcome === 'unreachable') {
     const line = outcome === 'refused'
-      ? redactSecrets(`${PREFIX}the router at ${settings.url} refused the key (401), so this session reports nothing`,
+      ? redactSecrets(`the router at ${settings.url} refused the key (401), so this session reports nothing`,
         settings.key)
-      : `${PREFIX}${unreachable(fetched, settings)}, the allowance tool answers once it is back`
-    $.ui.log(line)
-    if (notifications) $.ui.toast(line)
+      : `${unreachable(fetched, settings)}, the allowance tool answers once it is back`
+    tell(line)
   }
   // The tool list sits at the front of the prompt's cached prefix, so the tool is registered while the router is
   // unreachable rather than appearing later and rewriting the whole prefix once.

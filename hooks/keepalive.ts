@@ -21,7 +21,7 @@ import {
   samePark,
 } from './rules.ts'
 import type { AgentRecord, Body, Cron, Park, Report } from './rules.ts'
-import { bearer, errorText, parsed, PREFIX, redactSecrets } from './settings.ts'
+import { bearer, errorText, parsed, redactSecrets, say } from './settings.ts'
 import type { Settings } from './settings.ts'
 
 // The oldest client whose hook events this module was checked against.
@@ -678,8 +678,8 @@ async function pump($: EngineInterface): Promise<void> {
       response = undefined
       try {
         const reason = redactSecrets(errorText(error), config.key)
-        $.ui.log(`${PREFIX}the ${report.event} report could not be sent (${reason}), so the mod retries under its ` +
-          'backoff unless the session ends first', { to: 'debug' })
+        say($, `the ${report.event} report could not be sent (${reason}), so the mod retries under its backoff ` +
+          'unless the session ends first', { to: 'debug' })
       } catch {
         // A host that refuses the log call, or an error value that cannot become a string, must not stop the pump,
         // since a throw here would leave queue.inFlight set for the process.
@@ -786,8 +786,8 @@ function settle($: EngineInterface, record: SessionRecord, report: Report, respo
     clearSettings()
     emptyQueue()
     timer?.cancel()
-    $.ui.log(`${PREFIX}the router refused the key with status ${response.status}, so this process reports nothing ` +
-      'until a start\'s check accepts the key', { to: 'debug' })
+    say($, `the router refused the key with status ${response.status}, so this process reports nothing until a ` +
+      'start\'s check accepts the key', { to: 'debug' })
     return
   }
   if (response.status === 409) {
@@ -798,8 +798,8 @@ function settle($: EngineInterface, record: SessionRecord, report: Report, respo
   // keeps no trace of it, which leaves this line as the one sign of a body the mod built wrong.
   const code = answerOf(response.text).code
   const named = code !== undefined && CODE.test(code) ? `with code ${code}` : 'with no code'
-  $.ui.log(`${PREFIX}the router answered status ${response.status} ${named} to the ${report.event} report, so the ` +
-    'mod drops it', { to: 'debug' })
+  say($, `the router answered status ${response.status} ${named} to the ${report.event} report, so the mod drops it`,
+    { to: 'debug' })
 }
 
 function delay($: EngineInterface, now: number): void {
@@ -852,7 +852,7 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
   }
   if (report.event === 'session_start') {
     if (record.conflicted === true && report.previous_instance_id !== undefined) {
-      $.ui.log(`${PREFIX}took over session ${record.id} from a silent instance`)
+      say($, `took over session ${record.id} from a silent instance`)
     }
     record.conflicted = undefined
   }
@@ -892,8 +892,7 @@ function refusedReport($: EngineInterface, record: SessionRecord, report: Report
       delay($, now)
       if (record.conflicted !== true) {
         record.conflicted = true
-        $.ui.log(`${PREFIX}another instance reports session ${record.id}, so the start is retried once its ` +
-          'lease lapses')
+        say($, `another instance reports session ${record.id}, so the start is retried once its lease lapses`)
       }
       return
     case 'unknown_previous_instance':
@@ -976,8 +975,7 @@ async function processIdentity($: EngineInterface): Promise<string | undefined> 
   hostProcess = { id }
   // Whether that parent is the client process rests on how the host spawns the shell, so the read shows in the log.
   if (id !== undefined) {
-    $.ui.log(`${PREFIX}the client process reads as ${id}, which keys the pair the mod reuses across a clear`,
-      { to: 'debug' })
+    say($, `the client process reads as ${id}, which keys the pair the mod reuses across a clear`, { to: 'debug' })
   }
   return id
 }

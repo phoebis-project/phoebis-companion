@@ -1,4 +1,4 @@
-import type { PluginOptions } from 'claude-code'
+import type { EngineInterface, PluginOptions } from 'claude-code'
 
 // The settings layer and the helpers the two hooks modules share. keepalive.ts and allowance.ts both import it, so the
 // allowance tool, which runs with the keepalive switch off, depends on nothing in the lifecycle.
@@ -65,6 +65,19 @@ export function versionAtLeast(version: string, minimum: readonly [number, numbe
   if (major !== leastMajor) return major > leastMajor
   if (minor !== leastMinor) return minor > leastMinor
   return patch >= leastPatch
+}
+
+/** The opening of the line for a client older than `minimum`, `undefined` for one at or past it. */
+export function belowFloor(client: string, minimum: readonly [number, number, number]): string | undefined {
+  return versionAtLeast(client, minimum) ? undefined : `Claude Code ${client} is older than ${minimum.join('.')}`
+}
+
+/** Writes one of the mod's lines under its prefix and answers the line, so a toast can show the same text. */
+export function say($: EngineInterface, text: string, options?: Parameters<EngineInterface['ui']['log']>[1]): string {
+  const line = PREFIX + text
+  if (options === undefined) $.ui.log(line)
+  else $.ui.log(line, options)
+  return line
 }
 
 function given(value: string | undefined): string | undefined {

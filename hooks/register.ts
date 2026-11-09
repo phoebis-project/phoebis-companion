@@ -1,14 +1,14 @@
 import type { Register } from 'claude-code'
 import { answerCall, errorAnswer, retireStarts, startCheck, TOOL_CALL } from './allowance.ts'
 import { clearSettings, emptyQueue, installKeepalive, MINIMUM_VERSION, startKeepalive } from './keepalive.ts'
-import { errorText, optionsOf, PREFIX, redactSecrets, resolveSettings, urlProblem, versionAtLeast } from './settings.ts'
+import { belowFloor, errorText, optionsOf, redactSecrets, resolveSettings, say, urlProblem } from './settings.ts'
 import type { Resolution, Settings } from './settings.ts'
 
 const MISSING: Record<Extract<Resolution, { missing: unknown }>['missing'], string> = {
-  invalid_url: `${PREFIX}the management URL from the option or ANTHROPIC_BASE_URL is not usable`,
-  no_token: `${PREFIX}no router key from the option or the environment`,
-  no_url: `${PREFIX}no management URL from the option or ANTHROPIC_BASE_URL`,
-  token_without_url: `${PREFIX}the token setting needs the Management URL, so this session reports nothing`,
+  invalid_url: 'the management URL from the option or ANTHROPIC_BASE_URL is not usable',
+  no_token: 'no router key from the option or the environment',
+  no_url: 'no management URL from the option or ANTHROPIC_BASE_URL',
+  token_without_url: 'the token setting needs the Management URL, so this session reports nothing',
 }
 
 const UNCONFIGURED = 'the allowance is unknown: this session\'s last start left no usable router configuration ' +
@@ -64,17 +64,17 @@ export const register: Register = (on, options) => {
     starts += 1
     const start = starts
     let resolved: Settings | undefined
-    const tell = (line: string): void => {
-      $.ui.log(line)
+    const tell = (text: string): void => {
+      const line = say($, text)
       if (config.notifications) $.ui.toast(line)
     }
     // Each `return next(e)` below hands back its promise unawaited, so a rejection beneath never reaches this catch.
     try {
       const { version, base } = await $.session.version()
       const client = base ?? version
-      if (!versionAtLeast(client, MINIMUM_VERSION)) {
-        const floor = MINIMUM_VERSION.join('.')
-        tell(`${PREFIX}Claude Code ${client} is older than ${floor}, so the mod does nothing`)
+      const older = belowFloor(client, MINIMUM_VERSION)
+      if (older !== undefined) {
+        tell(`${older}, so the mod does nothing`)
         return next(e)
       }
       const [baseUrl, authToken, apiKey, oauthToken] = await Promise.all([
@@ -106,7 +106,7 @@ export const register: Register = (on, options) => {
       // No await falls between setting current and startCheck's generation step, so the start that set current last
       // is the one whose check is not stale.
       current = resolution.settings
-      const outcome = await startCheck($, resolution.settings, sessionId, client, config.notifications)
+      const outcome = await startCheck($, resolution.settings, sessionId, client, tell)
       // A later start that set or cleared current during the check owns the configuration, so this one leaves it.
       if (outcome === 'stale' || current !== resolution.settings) return next(e)
       if (outcome === 'refused') {
@@ -121,8 +121,8 @@ export const register: Register = (on, options) => {
       if (start === starts || (resolved !== undefined && current === resolved)) {
         const key = current?.key ?? ''
         deactivate()
-        const line = `${PREFIX}the session start hook failed (${errorText(error)}), so this session reports nothing`
-        $.ui.log(redactSecrets(line, key), { to: 'debug' })
+        const line = `the session start hook failed (${errorText(error)}), so this session reports nothing`
+        say($, redactSecrets(line, key), { to: 'debug' })
       }
       return next(e)
     }
