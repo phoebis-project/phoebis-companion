@@ -75,8 +75,7 @@ export function belowFloor(client: string, minimum: readonly [number, number, nu
 /** Writes one of the mod's lines under its prefix and answers the line, so a toast can show the same text. */
 export function say($: EngineInterface, text: string, options?: Parameters<EngineInterface['ui']['log']>[1]): string {
   const line = PREFIX + text
-  if (options === undefined) $.ui.log(line)
-  else $.ui.log(line, options)
+  $.ui.log(line, options)
   return line
 }
 
