@@ -677,16 +677,14 @@ describe('session end is sent at once ahead of the queue and past the request in
 
 describe('the mod sends nothing without a url or without a key', () => {
   const loads = [
-    ['without a url', {}, {}, '2.1.292',
-      'phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL'],
-    ['without a key', CONFIGURED.options, {}, '2.1.292',
-      'phoebis-companion: no router key from the option or the environment'],
+    ['without a url', {}, {}, 'phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL'],
+    ['without a key', CONFIGURED.options, {}, 'phoebis-companion: no router key from the option or the environment'],
   ] as const
-  for (const [name, options, variables, version, line] of loads) {
+  for (const [name, options, variables, line] of loads) {
     test(name, { options }, async ($, on) => {
       mock.env(on, variables)
       const clock = mock.clock(on, { now: T0 })
-      const router = fakeRouter(on, clock, { version })
+      const router = fakeRouter(on, clock, { version: '2.1.292' })
       await start($, clock)
       await prompt($, clock)
       await clock.advance(60000)

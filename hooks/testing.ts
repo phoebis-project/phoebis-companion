@@ -472,7 +472,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   })
   on('store.get', async (_$, e) => {
     router.reached.push('store.get')
-    if (storeDelayMs > 0) {
+    if (e.key === 'identities' && storeDelayMs > 0) {
       const ms = storeDelayMs
       storeDelayMs = 0
       await clock.sleep(ms)

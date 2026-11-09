@@ -572,12 +572,19 @@ test('a subagent parked on its own command stays parked through a notification n
     // The client notifies the parent at once when a subagent stops with background work of its own, and the mod
     // reads nothing from that text: the subagent stays parked on its command.
     await submit($, clock, 'task-notification', notification('agent-1', 'completed'))
-    await stop($, clock, [{ id: 'bg-3', type: 'shell', status: 'running' }, { id: 'agent-1', type: 'subagent', status: 'running' }])
+    await stop($, clock, [
+      { id: 'bg-3', type: 'shell', status: 'running' },
+      { id: 'agent-1', type: 'subagent', status: 'running' },
+    ])
     await complete($, clock)
     expect(told(router).slice(settled)).toEqual(['state main parked background'])
     // The next stop event's registry no longer runs the command, so the subagent has nothing open and is released.
     await stop($, clock, [{ id: 'agent-1', type: 'subagent', status: 'running' }])
-    expect(told(router).slice(settled)).toEqual(['state main parked background', 'state agent-1 released', 'state main idle'])
+    expect(told(router).slice(settled)).toEqual([
+      'state main parked background',
+      'state agent-1 released',
+      'state main idle',
+    ])
   })
 
 test('a subagent\'s own child joins its open set, it parks on it at its turn end, and the child\'s end releases it',
@@ -1083,7 +1090,8 @@ test('a command leaves its open set only when a stop event\'s registry no longer
     const settled = states(router).length
     // A registry that still runs every command, pending or running, leaves the set as it is, whichever loop's stop
     // carries it.
-    const all = (status: string) => ['bg-1', 'bg-2', 'bg-3', 'bg-4', 'bg-5'].map((id) => ({ id, type: 'shell', status }))
+    const all = (status: string) =>
+      ['bg-1', 'bg-2', 'bg-3', 'bg-4', 'bg-5'].map((id) => ({ id, type: 'shell', status }))
     await stop($, clock, all('running'))
     await stop($, clock, all('pending'))
     await stop($, clock, all('running'), 'agent-9')
@@ -1093,7 +1101,10 @@ test('a command leaves its open set only when a stop event\'s registry no longer
     const ended = [['bg-5', 'completed'], ['bg-4', 'failed'], ['bg-3', 'killed'], ['bg-2', 'stopped']] as const
     for (const [task, status] of ended) {
       remaining.splice(remaining.indexOf(task), 1)
-      await stop($, clock, [...remaining.map((id) => ({ id, type: 'shell', status: 'running' })), { id: task, type: 'shell', status }])
+      await stop($, clock, [
+        ...remaining.map((id) => ({ id, type: 'shell', status: 'running' })),
+        { id: task, type: 'shell', status },
+      ])
     }
     await stop($, clock, [])
     expect(states(router).slice(settled)).toEqual([

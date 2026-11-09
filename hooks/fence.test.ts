@@ -231,7 +231,7 @@ test('a reload under a later session id of the same process reuses the pair the 
     keptInStore(router, PROCESS)
   })
 
-test('a start replaced while its fence reads writes no header lines', CONFIGURED, async ($, on) => {
+test('a start replaced while its fence reads writes none of its identity', CONFIGURED, async ($, on) => {
   const { clock, router } = processHost(on, { ANTHROPIC_AUTH_TOKEN: KEY }, { process: PROCESS })
   // The first start's read of the stored pairs answers a second late, and a second start runs to its end meanwhile.
   router.delayStore(1000)
