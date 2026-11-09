@@ -608,12 +608,12 @@ async function persistModel($: EngineInterface): Promise<void> {
   await $.state.set(MODEL_REF, value)
 }
 
-async function ensureSession($: EngineInterface, revive: () => boolean): Promise<void> {
+async function ensureSession($: EngineInterface, current: () => boolean): Promise<void> {
   const id = await $.session.id()
-  // A record that ended under the current id is a conversation resumed after its end, which the router closed with
-  // the session_end. Only a prompt or a current start shows the resume, and the question is asked at each decision,
-  // since a start can lose its currency while it waits.
-  const kept = (): boolean => session?.id === id && !(session.stopped && revive())
+  // The record moves only for a prompt or a start that is still current at each decision, since a start can lose its
+  // currency while it waits. A stopped record under the current id is a conversation resumed after the session_end
+  // closed it, so a current caller revives it.
+  const kept = (): boolean => !current() || (session?.id === id && !session.stopped)
   if (kept() || identity === undefined) return
   // The same id in the same process is a reload of the module or a resume after its end, and the host still holds
   // its tracked work. A new id is a new conversation, so nothing the old one had open or scheduled carries over. Read
@@ -1064,6 +1064,8 @@ export async function startKeepalive($: EngineInterface, resolved: Settings, isC
     $.env.get('BASH_DEFAULT_TIMEOUT_MS'),
     $.env.get('BASH_MAX_TIMEOUT_MS'),
   ])
+  // A later start that landed during the fence owns the identity, the bounds and the session it moves.
+  if (!isCurrent()) return
   identity = pair
   bashBounds = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
   await ensureSession($, isCurrent)

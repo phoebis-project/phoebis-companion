@@ -928,6 +928,42 @@ test('a start superseded while it waits never revives the session that ended mea
     expect(events(router)).toEqual(['session_start', 'session_end'])
   })
 
+test('a start replaced while it waits in its fence registers no successor after a clear', CONFIGURED,
+  async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])
+    const clock = mock.clock(on, { now: T0 })
+    // The first start's read of the command bounds answers two seconds late, so it waits in its fence while a
+    // reload's start registers and a clear moves the host to a new id.
+    let delayed = false
+    on('env.get', async (_$, e) => {
+      if (e.name === 'BASH_DEFAULT_TIMEOUT_MS' && !delayed) {
+        delayed = true
+        await clock.sleep(2000)
+      }
+      return { value: variables.get(e.name) }
+    })
+    const router = fakeRouter(on, clock)
+    const held = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    await start($, clock)
+    await end($, clock, 'clear', 'session-a')
+    router.setId('session-b')
+    await clock.advance(2000)
+    await held
+    // A tool call lands once the held start has resolved, which would pump a record it built for the new id.
+    await $.tool.call({ tool: 'Read', tool_use_id: 'toolu_1' } as Parameters<Engine['tool']['call']>[0])
+    await clock.settle()
+    expect(router.requests.map((body) => [body.event, body.session_id])).toEqual([
+      ['session_start', 'session-a'],
+      ['session_end', 'session-a'],
+    ])
+    await prompt($, clock)
+    expect(router.requests.slice(2).map((body) => [body.event, body.session_id])).toEqual([
+      ['session_start', 'session-b'],
+      ['activity', 'session-b'],
+    ])
+  })
+
 describe('the request is a POST of protocol 1 to the events path with a JSON content type', () => {
   const urls = [
     [ROUTER_URL, `${ROUTER_URL}/v0/keepalive/events`],
