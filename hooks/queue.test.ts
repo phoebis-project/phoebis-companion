@@ -594,6 +594,26 @@ test('a tick already reading the id when the session ends does not revive it', C
   expect(events(router)).toEqual(['session_start', 'session_end'])
 })
 
+test('a tick whose id read lands after a clear leaves the new id to its first prompt', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  // The heartbeat's tick reads the id two seconds late, so the read answers with the id the clear moved to.
+  router.delayId(2000)
+  await clock.advance(25000)
+  await end($, clock, 'clear', 'session-a')
+  router.setId('session-b')
+  await clock.advance(2000)
+  expect(router.requests.map((body) => [body.event, body.session_id])).toEqual([
+    ['session_start', 'session-a'],
+    ['session_end', 'session-a'],
+  ])
+  await prompt($, clock)
+  expect(router.requests.slice(2).map((body) => [body.event, body.session_id])).toEqual([
+    ['session_start', 'session-b'],
+    ['activity', 'session-b'],
+  ])
+})
+
 test('an ended session\'s timer never registers the successor id', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on)
   await start($, clock)
