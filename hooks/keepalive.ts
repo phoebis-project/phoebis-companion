@@ -610,12 +610,12 @@ async function persistModel($: EngineInterface): Promise<void> {
   await $.state.set(MODEL_REF, value)
 }
 
-async function ensureSession($: EngineInterface, current: () => boolean): Promise<void> {
+async function ensureSession($: EngineInterface, isCurrent: () => boolean): Promise<void> {
   const id = await $.session.id()
   // The record moves only for a prompt or a start that is still current at each decision, since a start can lose its
   // currency while it waits. A stopped record under the current id is a conversation resumed after the session_end
   // closed it, so a current caller revives it.
-  const kept = (): boolean => !current() || (session?.id === id && !session.stopped)
+  const kept = (): boolean => !isCurrent() || (session?.id === id && !session.stopped)
   if (kept() || identity === undefined) return
   // The same id in the same process is a reload of the module or a resume after its end, and the host still holds
   // its tracked work. A new id is a new conversation, so nothing the old one had open or scheduled carries over. Read
