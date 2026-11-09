@@ -611,8 +611,8 @@ async function persistModel($: EngineInterface): Promise<void> {
 async function ensureSession($: EngineInterface, revive: () => boolean): Promise<void> {
   const id = await $.session.id()
   // A record that ended under the current id is a conversation resumed after its end, which the router closed with
-  // the session_end. Only a prompt or a current start shows the resume, so a tick leaves the record ended. The
-  // question is asked at each decision, since a start can lose its currency while it waits.
+  // the session_end. Only a prompt or a current start shows the resume, and the question is asked at each decision,
+  // since a start can lose its currency while it waits.
   const kept = (): boolean => session?.id === id && !(session.stopped && revive())
   if (kept() || identity === undefined) return
   // The same id in the same process is a reload of the module or a resume after its end, and the host still holds
