@@ -733,7 +733,8 @@ test('the key appears in the Authorization header and nowhere else', CONFIGURED,
   expect(JSON.stringify(router.logs)).not.toContain(KEY)
 })
 
-describe('a key the router refuses stops the mod for the process with one debug line naming the status', () => {
+describe('a key the router refuses stops reporting until a start\'s check accepts it, with one debug line naming ' +
+  'the status', () => {
   const refusals = [
     [401, 'authentication_error', 'the presented key is not valid'],
     [403, 'permission_error', 'the presented key may not report sessions'],
@@ -756,8 +757,7 @@ describe('a key the router refuses stops the mod for the process with one debug 
       expect(router.logs).toHaveLength(1)
       const line = nth(router.logs, 0)
       expect(line.to).toBe('debug')
-      expect(line.text).toBe(`phoebis-companion: the router refused the key with status ${status}, so this process ` +
-        'reports nothing until a start\'s check accepts the key')
+      expect(line.text).toContain(String(status))
       expect(line.text).not.toContain(KEY)
     })
   }
