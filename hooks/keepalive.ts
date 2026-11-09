@@ -788,12 +788,12 @@ function settle($: EngineInterface, config: Settings, record: SessionRecord, rep
     return
   }
   if (response.status === 401 || response.status === 403) {
-    // A key the router refused is refused for every session of the process until a later start's check passes, since
-    // retrying it would only fill the router's log.
+    // A refused report stops every session of the process until a later start's check no longer refuses the key,
+    // since a retry would only fill the router's log.
     clearSettings()
     emptyQueue()
     timer?.cancel()
-    say($, `the router refused the key with status ${response.status}, so this process reports nothing until a ` +
+    say($, `a report was refused with status ${response.status}, so this process reports nothing until a ` +
       'start\'s check no longer refuses the key', { to: 'debug' })
     onRefused(response.status, config)
     return
