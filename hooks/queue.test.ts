@@ -822,7 +822,7 @@ test('a report on the wire at a key change does not refuse the new key', CONFIGU
   // The fake answers the start's GET 200 by default, so the check passes under K2.
   variables.set('ANTHROPIC_AUTH_TOKEN', 'K2')
   await start($, clock)
-  // Past the hold and the backoff, and short of the heartbeat the registration's answer schedules.
+  // Past the hold, and short of the heartbeat the registration's answer schedules.
   await clock.advance(5000)
   expect(events(router).slice(2)).toEqual(['session_start'])
   expect(router.headers.slice(2).map((headers) => headers.Authorization)).toEqual(['Bearer K2'])
