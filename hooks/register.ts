@@ -64,15 +64,17 @@ export const register: Register = (on, options) => {
     starts += 1
     const start = starts
     let resolved: Settings | undefined
+    const tell = (line: string): void => {
+      $.ui.log(line)
+      if (config.notifications) $.ui.toast(line)
+    }
     // Each `return next(e)` below hands back its promise unawaited, so a rejection beneath never reaches this catch.
     try {
       const { version, base } = await $.session.version()
       const client = base ?? version
       if (!versionAtLeast(client, MINIMUM_VERSION)) {
         const floor = MINIMUM_VERSION.join('.')
-        const line = `${PREFIX}Claude Code ${client} is older than ${floor}, so the mod does nothing`
-        $.ui.log(line)
-        if (config.notifications) $.ui.toast(line)
+        tell(`${PREFIX}Claude Code ${client} is older than ${floor}, so the mod does nothing`)
         return next(e)
       }
       const [baseUrl, authToken, apiKey, oauthToken] = await Promise.all([
@@ -96,8 +98,7 @@ export const register: Register = (on, options) => {
           ? `${MISSING[resolution.missing]} (${resolution.problem})`
           : MISSING[resolution.missing]
         deactivate()
-        $.ui.log(line)
-        if (config.notifications) $.ui.toast(line)
+        tell(line)
         return next(e)
       }
       resolved = resolution.settings
