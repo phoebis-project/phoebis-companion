@@ -11,7 +11,7 @@ const MISSING: Record<Extract<Resolution, { missing: unknown }>['missing'], stri
   token_without_url: 'the token setting needs the Management URL, so this session reports nothing',
 }
 
-const UNCONFIGURED = 'the allowance is unknown: this session\'s last start left no usable router configuration ' +
+const UNCONFIGURED = 'the allowance is unknown: this session has no usable router configuration ' +
   '(settings missing or unusable, key refused or start failed)'
 
 // Counts the session starts, so a start that throws can tell whether a later start has begun since.
@@ -37,8 +37,9 @@ export const register: Register = (on, options) => {
 
   if (config.keepalive) {
     // The events route and the allowance route share the key, each under its own permission, so a 403 can withhold
-    // the keepalive while the allowance stays readable, and only a 401 refuses the key for both. A start whose check
-    // is still out holds settings of its own, so a refusal of the settings it replaced leaves that start current.
+    // the keepalive while the allowance stays readable, and only a 401 refuses the key for both. A start that has not
+    // yet installed its settings holds settings of its own, so a refusal of the settings it replaced leaves that start
+    // current.
     installKeepalive(on, (status, under) => {
       if (status === 401 && current === under) current = undefined
     })

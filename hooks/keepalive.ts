@@ -794,7 +794,7 @@ function settle($: EngineInterface, config: Settings, record: SessionRecord, rep
     emptyQueue()
     timer?.cancel()
     say($, `the router refused the key with status ${response.status}, so this process reports nothing until a ` +
-      'start\'s check accepts the key', { to: 'debug' })
+      'start\'s check no longer refuses the key', { to: 'debug' })
     onRefused(response.status, config)
     return
   }

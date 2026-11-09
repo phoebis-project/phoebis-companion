@@ -777,8 +777,8 @@ test('the key appears in the Authorization header and nowhere else', CONFIGURED,
   expect(JSON.stringify(router.logs)).not.toContain(KEY)
 })
 
-describe('a key the router refuses stops reporting until a start\'s check accepts it, with one debug line naming ' +
-  'the status', () => {
+describe('a key the router refuses stops reporting until a start\'s check no longer refuses it, with one debug ' +
+  'line naming the status', () => {
   const refusals = [
     [401, 'authentication_error', 'the presented key is not valid'],
     [403, 'permission_error', 'the presented key may not report sessions'],
