@@ -7,7 +7,7 @@ const CREDENTIAL = 'a URL with a username or password'
 const FRAGMENT = 'a URL with a fragment'
 const QUERY = 'a URL with a query'
 const NOT_HTTP = 'an http or https URL with a host'
-export const PREFIX = 'phoebis-companion: '
+const PREFIX = 'phoebis-companion: '
 
 type Options = { managementUrl: string; token: string; keepalive: boolean; notifications: boolean }
 
