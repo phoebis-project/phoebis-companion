@@ -36,10 +36,10 @@ export const register: Register = (on, options) => {
   }
 
   if (config.keepalive) {
-    // The events route and the allowance route share the key, each under its own permission, so a 403 can withhold
-    // the keepalive while the allowance stays readable, and only a 401 refuses the key for both. A start that has not
-    // yet installed its settings holds settings of its own, so a refusal of the settings it replaced leaves that start
-    // current.
+    // Only a 401 says the router refused the key, which both routes share. A 403 refuses one request, from something in
+    // front of the router, and says nothing about whether the key may read the allowance, which the tool's own route
+    // answers. A start that has not yet installed its settings holds settings of its own, so a refusal of the settings
+    // it replaced leaves that start current.
     installKeepalive(on, (status, under) => {
       if (status === 401 && current === under) current = undefined
     })
