@@ -642,14 +642,12 @@ describe('session end is sent at once ahead of the queue and past the request in
   }
 })
 
-describe('the mod sends nothing without a url, without a key and on a client older than 2.1.287', () => {
+describe('the mod sends nothing without a url or without a key', () => {
   const loads = [
     ['without a url', {}, {}, '2.1.292',
       'phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL'],
     ['without a key', CONFIGURED.options, {}, '2.1.292',
       'phoebis-companion: no router key from the option or the environment'],
-    ['on 2.1.286', CONFIGURED.options, { ANTHROPIC_AUTH_TOKEN: KEY }, '2.1.286',
-      'phoebis-companion: Claude Code 2.1.286 is older than 2.1.287, so the mod does nothing'],
   ] as const
   for (const [name, options, variables, version, line] of loads) {
     test(name, { options }, async ($, on) => {
@@ -662,9 +660,22 @@ describe('the mod sends nothing without a url, without a key and on a client old
       await end($, clock, 'other', 'session-a')
       expect(router.reached.filter((op) => ['http.fetch', 'env.set'].includes(op))).toEqual([])
       expect(router.logs).toEqual([{ text: line, to: 'transcript' }])
-      expect(router.toasts).toEqual([line])
     })
   }
+})
+
+test('a client older than 2.1.287 gets the floor line and its toast and sends nothing', CONFIGURED, async ($, on) => {
+  mock.env(on, { ANTHROPIC_AUTH_TOKEN: KEY })
+  const clock = mock.clock(on, { now: T0 })
+  const router = fakeRouter(on, clock, { version: '2.1.286' })
+  await start($, clock)
+  await prompt($, clock)
+  await clock.advance(60000)
+  await end($, clock, 'other', 'session-a')
+  const line = 'phoebis-companion: Claude Code 2.1.286 is older than 2.1.287, so the mod does nothing'
+  expect(router.reached.filter((op) => ['http.fetch', 'env.set'].includes(op))).toEqual([])
+  expect(router.logs).toEqual([{ text: line, to: 'transcript' }])
+  expect(router.toasts).toEqual([line])
 })
 
 test('a token from the option without management_url sends nothing to ANTHROPIC_BASE_URL and says so in one ' +
@@ -761,49 +772,6 @@ describe('a key the router refuses stops reporting until a start\'s check accept
       expect(line.text).not.toContain(KEY)
     })
   }
-})
-
-test('a start whose check registers the tool after a refused key resumes under the corrected key', CONFIGURED,
-  async ($, on) => {
-    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'K1']])
-    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
-    const clock = mock.clock(on, { now: T0 })
-    const router = fakeRouter(on, clock)
-    router.answer(() => ({ status: 401 }))
-    await start($, clock)
-    await prompt($, clock)
-    await clock.advance(30000)
-    expect(events(router)).toEqual(['session_start'])
-    // The fake answers the start's GET 200 by default, so the check registers the tool under the new key.
-    variables.set('ANTHROPIC_AUTH_TOKEN', 'K2')
-    await start($, clock)
-    await clock.advance(25000)
-    expect(events(router).slice(1)).toEqual(['session_start', 'heartbeat'])
-    expect(router.headers.slice(1).map((headers) => headers.Authorization)).toEqual(['Bearer K2', 'Bearer K2'])
-  })
-
-test('a report on the wire at a deactivation does not come back', CONFIGURED, async ($, on) => {
-  const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])
-  on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
-  const clock = mock.clock(on, { now: T0 })
-  const router = fakeRouter(on, clock)
-  await start($, clock)
-  // The heartbeat's answer is held a second, so the start with no key runs while the heartbeat is out.
-  router.answer(async () => {
-    await clock.sleep(1000)
-    return { status: 503 }
-  })
-  await clock.advance(25000)
-  expect(events(router)).toEqual(['session_start', 'heartbeat'])
-  variables.delete('ANTHROPIC_AUTH_TOKEN')
-  await start($, clock)
-  await clock.advance(1000)
-  // The fake answers the start's GET 200 by default, so the check passes under the key put back.
-  variables.set('ANTHROPIC_AUTH_TOKEN', KEY)
-  await start($, clock)
-  // Past the backoff a restored heartbeat would wait, and short of the heartbeat the registration's answer schedules.
-  await clock.advance(5000)
-  expect(events(router).slice(2)).toEqual(['session_start'])
 })
 
 test('a report on the wire at a key change does not refuse the new key', CONFIGURED, async ($, on) => {

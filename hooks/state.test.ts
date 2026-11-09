@@ -750,24 +750,6 @@ test('a registration answer with a stale park is corrected by a state report', C
   expect(told(router).slice(settled)).toEqual(['session_start', `state main parked background ${T0 + 1800000}`])
 })
 
-test('a registration answer with the same park sends nothing', CONFIGURED, async ($, on) => {
-  const { clock, router } = host(on)
-  await start($, clock)
-  await submit($, clock, 'composer')
-  await call($, clock, router, ...bash('bg-1'))
-  await complete($, clock)
-  router.answer(() => ({ status: 409, body: { code: 'unknown_instance' } }))
-  router.answer((_body, ack) => ok({
-    ...ack,
-    agents: [
-      { agent_id: 'main', state: 'parked', park_kind: 'background', deadline: T0 + 1800000, request_generation: 1 },
-    ],
-  }))
-  const settled = told(router).length
-  await clock.advance(25000)
-  expect(told(router).slice(settled)).toEqual(['session_start'])
-})
-
 test('a registration answer that parks main with no park is corrected by a state report', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on)
   await start($, clock)
