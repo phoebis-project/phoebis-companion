@@ -95,7 +95,7 @@ test('config.set denies a URL with a credential or a query and takes a path pref
 })
 
 test('a URL with a fragment is refused, as the route paths appended to it would land in the fragment', () => {
-  expect(urlProblem('http://127.0.0.1:8317/#/sessions')).toBe('an http or https URL with a host')
+  expect(urlProblem('http://127.0.0.1:8317/#/sessions')).toBe('a URL with a fragment')
 })
 
 test('the management_url hook keeps a URL with a credential out of the settings and writes a path prefix',

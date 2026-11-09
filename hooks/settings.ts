@@ -4,6 +4,7 @@ import type { PluginOptions } from 'claude-code'
 // allowance tool, which runs with the keepalive switch off, depends on nothing in the lifecycle.
 
 const CREDENTIAL = 'a URL with a username or password'
+const FRAGMENT = 'a URL with a fragment'
 const QUERY = 'a URL with a query'
 const NOT_HTTP = 'an http or https URL with a host'
 export const PREFIX = 'phoebis-companion: '
@@ -42,7 +43,8 @@ export function urlProblem(value: unknown): string | undefined {
   // The route paths are appended to the URL, so anything after the path, a query or a fragment, would swallow them.
   const prefix = url.origin + url.pathname
   if (url.href === prefix) return undefined
-  return url.href.startsWith(`${prefix}?`) ? QUERY : NOT_HTTP
+  if (url.href.startsWith(`${prefix}?`)) return QUERY
+  return url.href.startsWith(`${prefix}#`) ? FRAGMENT : NOT_HTTP
 }
 
 /** The four options as the manifest types them, a wrong type read as the default. */
