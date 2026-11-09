@@ -1464,6 +1464,26 @@ test('a prompt whose chain finishes after a clear changes nothing', CONFIGURED, 
   expect(under(router, 'session-b')).toEqual(['session_start', 'activity main prompt'])
 })
 
+test('a prompt whose chain finishes after a clear\'s start leaves the new session alone', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    router.answerSubmit(async () => {
+      await clock.sleep(2000)
+      return { text: 'hi' }
+    })
+    const held = $.prompt.submit({ text: 'hi', origin: { kind: 'composer' } as { kind: 'composer' }, wait: false })
+    await clock.settle()
+    await end($, clock, 'clear', 'session-a')
+    router.setId('session-b')
+    // The clear's own start registers the new id while the prompt is still held, so the session is live again.
+    await start($, clock)
+    await clock.advance(2000)
+    await held
+    await clock.settle()
+    expect(under(router, 'session-b')).toEqual(['session_start'])
+  })
+
 test('an agent the list names only after its first step is judged again at its spawn and at the tick', CONFIGURED,
   async ($, on) => {
     const { clock, router } = host(on)
