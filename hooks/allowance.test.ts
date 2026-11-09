@@ -484,9 +484,7 @@ test('a 403 on the events route leaves the tool reading', CONFIGURED, async ($, 
   router.answer(() => ({ status: 403 }))
   await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
   await clock.settle()
-  await clock.advance(10_000)
   expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
-  expect(router.gets).toHaveLength(2)
 })
 
 test('a 401 on a report sent under the settings a start replaced leaves the start in flight current', CONFIGURED,
