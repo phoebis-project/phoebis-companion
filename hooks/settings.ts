@@ -57,7 +57,7 @@ export function optionsOf(options: PluginOptions): Options {
   }
 }
 
-export function versionAtLeast(version: string, minimum: readonly [number, number, number]): boolean {
+function versionAtLeast(version: string, minimum: readonly [number, number, number]): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version)
   if (match === null) return false
   const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])]
