@@ -73,7 +73,6 @@ const CRON_LIFETIME_MS = 604800000
 type Model = {
   agents: Map<string, AgentRecord>
   crons: Map<string, Cron>
-  env: { defaultMs?: number; maxMs?: number }
   // Loops the client's list never names (a workflow's agents, the engine's forks), by the agent their events count for.
   unlisted: Map<string, string>
   // The agents whose own turn runs, so an unlisted loop's turn end does not rest one in the middle of it.
@@ -99,6 +98,7 @@ let identity: Identity | undefined
 // Read at the load's first fence: every session id of the process shares it, and a reload reads it again.
 let hostProcess: { id: string | undefined } | undefined
 let settings: Settings | undefined
+let bashBounds: { defaultMs?: number; maxMs?: number } = {}
 // The code of the registration's last refusal, while nothing else has been answered since.
 let startRefusal: unknown
 let session: SessionRecord | undefined
@@ -106,12 +106,9 @@ const queue: Queue = { reports: [], attempt: 0, deferred: new Map() }
 let timer: Timer | undefined
 // The tracked work as the host last took it, so a pump writes it only when it changed.
 let savedModel: string | undefined
-// A key the router refused is refused for every session of the process until a later start's check passes, since
-// retrying it would only fill the router's log.
-let refused = false
 // The reports already sent again under a generation the router named, so a second refusal drops them.
 const resent = new WeakSet<Report>()
-const model: Model = freshModel({})
+const model: Model = freshModel()
 
 // A start or a state of the agent's still queued carries a run the router takes after any answer that named the
 // agent released, so that answer no longer says the router ended what the mod holds.
@@ -145,7 +142,7 @@ function buildBody(session: SessionRecord, report: Report, nowMs: number): Body 
 }
 
 function active(): boolean {
-  return settings !== undefined && identity !== undefined && !refused
+  return settings !== undefined && identity !== undefined
 }
 
 // The pair itself, so a caller sends with the values this checked rather than reading the module's variables again.
@@ -169,11 +166,10 @@ function freshAgents(): Map<string, AgentRecord> {
   return new Map([[MAIN, freshRecord(MAIN, 'busy')]])
 }
 
-function freshModel(env: Model['env']): Model {
+function freshModel(): Model {
   return {
     agents: freshAgents(),
     crons: new Map(),
-    env,
     unlisted: new Map(),
     turning: new Set(),
     current: new Set(),
@@ -251,10 +247,10 @@ function change(agent: AgentRecord, edit: () => void): void {
 // Inside one park change, so a subagent whose last commands end together goes straight to its release. A park
 // reported between two removals would announce anew an agent the router already released.
 function dropCommands(owner: AgentRecord, drop: (task: SavedTask) => boolean): void {
+  const ended = [...owner.open.values()].filter((task) => task.kind === 'command' && drop(task))
+  if (ended.length === 0) return
   change(owner, () => {
-    for (const task of [...owner.open.values()]) {
-      if (task.kind === 'command' && drop(task)) owner.open.delete(task.id)
-    }
+    for (const task of ended) owner.open.delete(task.id)
   })
 }
 
@@ -356,7 +352,7 @@ async function toolRan($: EngineInterface, agentId: string, e: { tool: string; t
       const owner = model.agents.get(agentId)
       if (owner === undefined) return
       const timeout = field(e, 'timeout')
-      const deadline = commandDeadline(now, typeof timeout === 'number' ? timeout : undefined, model.env)
+      const deadline = commandDeadline(now, typeof timeout === 'number' ? timeout : undefined, bashBounds)
       change(owner, () => owner.open.set(task, { id: task, kind: 'command', deadline }))
       if (owner.id === MAIN && model.turning.has(MAIN)) model.current.add(task)
       return
@@ -636,8 +632,7 @@ async function ensureSession($: EngineInterface, revive: () => boolean): Promise
   queue.reports = collapse([], startReport())
   queue.deferred = new Map()
   savedModel = undefined
-  // startKeepalive reads the Bash variables before it calls this, so they carry over.
-  Object.assign(model, freshModel(model.env))
+  Object.assign(model, freshModel())
   if (held !== undefined) restoreModel(held, session)
 }
 
@@ -702,9 +697,8 @@ async function pump($: EngineInterface): Promise<void> {
     // the mod no longer reports. A start that cleared or replaced the settings meanwhile abandoned the report with
     // them, so its answer restores, schedules or refuses nothing. The registration a later start queues with its own
     // settings schedules the heartbeat again.
-    if (record === session && !record.stopped && !refused && settings === config) {
-      settle($, record, report, response, now, listed)
-    }
+    const still = reporting()
+    if (still?.record === record && still.config === config) settle($, record, report, response, now, listed)
   } catch {
     return
   }
@@ -786,7 +780,9 @@ function settle($: EngineInterface, record: SessionRecord, report: Report, respo
     return
   }
   if (response.status === 401 || response.status === 403) {
-    refused = true
+    // A key the router refused is refused for every session of the process until a later start's check passes, since
+    // retrying it would only fill the router's log.
+    clearSettings()
     emptyQueue()
     timer?.cancel()
     $.ui.log(`${PREFIX}the router refused the key with status ${response.status}, so this process reports nothing ` +
@@ -1054,15 +1050,15 @@ async function fence($: EngineInterface): Promise<Identity> {
  */
 export async function startKeepalive($: EngineInterface, resolved: Settings, isCurrent: () => boolean):
   Promise<void> {
-  // The earlier settings and the refusal hold through every await here. Replaced or lifted sooner, they would let a
-  // pump send under the refused key, whose 401 sets the refusal again, or register the record of an older id that
-  // ensureSession is about to replace.
-  identity = await fence($)
-  const [defaultMs, maxMs] = await Promise.all([
+  // The earlier settings hold through every await here. Replaced sooner, they would let a pump register the record of
+  // an older id that ensureSession is about to replace.
+  const [pair, defaultMs, maxMs] = await Promise.all([
+    fence($),
     $.env.get('BASH_DEFAULT_TIMEOUT_MS'),
     $.env.get('BASH_MAX_TIMEOUT_MS'),
   ])
-  model.env = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
+  identity = pair
+  bashBounds = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
   await ensureSession($, isCurrent)
   // A later session start can land during these awaits, and the settings it set or cleared must stand.
   if (!isCurrent()) return
@@ -1070,7 +1066,6 @@ export async function startKeepalive($: EngineInterface, resolved: Settings, isC
   // is what schedules the heartbeat, so the session registers again whatever ended the previous settings, and a
   // registered session's repeat is idempotent on the router.
   settings = resolved
-  refused = false
   reregister()
   void pump($)
 }
