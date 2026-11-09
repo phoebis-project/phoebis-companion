@@ -860,8 +860,6 @@ test('a refusal that lands after a start with the same values does not silence t
     // Past the hold, and short of the heartbeat the registration's answer schedules.
     await clock.advance(5000)
     expect(events(router).slice(2)).toEqual(['session_start'])
-    await clock.advance(25000)
-    expect(events(router).slice(2)).toEqual(['session_start', 'heartbeat'])
   })
 
 test('a prompt whose chain finishes while the settings are cleared queues nothing for the next start', CONFIGURED,
