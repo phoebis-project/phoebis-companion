@@ -250,6 +250,27 @@ test('a start replaced while its fence reads writes none of its identity', CONFI
   expect(router.store.get('identities')).toEqual([[PROCESS, pair]])
 })
 
+test('a replaced start\'s header write that the host lands late comes before the current start\'s identity',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = processHost(on, { ANTHROPIC_AUTH_TOKEN: KEY }, { process: PROCESS })
+    // The host completes the first start's header write a second late, and a second start replaces it meanwhile.
+    router.delayEnvSet(1000)
+    const replaced = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    // The second start's fence waits for the first start's delayed header write, so awaiting it before the clock moves
+    // would not return.
+    const current = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    await clock.advance(1000)
+    await replaced
+    await current
+    const registration = nth(registrations(router), 0)
+    expect(router.envWrites.slice(-2)).toEqual([
+      { name: HEADERS, value: `X-Keepalive-Owner-Id: ${ownerOfBody(registration)}` },
+      { name: INSTANCE, value: registration.instance_id },
+    ])
+  })
+
 test('a child process mints its own pair beside the one the store keeps for its parent', CONFIGURED,
   async ($, on) => {
     const { clock, router } = processHost(on, INHERITED, { process: CHILD, store: { identities: [[PROCESS, HELD]] } })

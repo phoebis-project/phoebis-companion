@@ -136,6 +136,11 @@ export type FakeRouter = {
    * prompt until it settles, as a settings hook that runs for a while does.
    */
   answerSubmit: (fn: () => PromptSubmitResult | Promise<PromptSubmitResult>) => void
+  /**
+   * Holds the next `$.env.set` of the owner header (`ANTHROPIC_CUSTOM_HEADERS`) for this long on the clock before the
+   * write lands, as a host whose hook on the write runs for a while does.
+   */
+  delayEnvSet: (ms: number) => void
   /** Holds the next `$.session.id()` for this long on the clock before it answers. */
   delayId: (ms: number) => void
   /** Holds the next `$.agent.list()` for this long on the clock before it answers. */
@@ -257,6 +262,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const submits: (() => PromptSubmitResult | Promise<PromptSubmitResult>)[] = []
   const registerDenials: string[] = []
   const versionDenials: string[] = []
+  let envSetDelayMs = 0
   let idDelayMs = 0
   let listDelayMs = 0
   let modelDelayMs = 0
@@ -324,6 +330,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     answerSubmit: (fn) => {
       submits.push(fn)
+    },
+    delayEnvSet: (ms) => {
+      envSetDelayMs = ms
     },
     delayId: (ms) => {
       idDelayMs = ms
@@ -442,8 +451,13 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     if (denial !== undefined) return { deny: denial }
     return { value: version }
   })
-  on('env.set', (_$, e) => {
+  on('env.set', async (_$, e) => {
     router.reached.push('env.set')
+    if (e.name === 'ANTHROPIC_CUSTOM_HEADERS' && envSetDelayMs > 0) {
+      const ms = envSetDelayMs
+      envSetDelayMs = 0
+      await clock.sleep(ms)
+    }
     router.envWrites.push({ name: e.name, value: e.value })
     // The op answers an object whose deny field is absent when the write was made.
     return { value: {} }

@@ -98,6 +98,11 @@ const TRIGGER_DELAY_MS = 5000
 let identity: Identity | undefined
 // Read at the load's first fence: every session id of the process shares it, and a reload reads it again.
 let hostProcess: { id: string | undefined } | undefined
+// A call on `$` runs the host's hook chain, which states no order across calls, so each fence's writes settle before
+// the next fence's begin, or a superseded start's header write that the host completes late could land after the
+// current start's and name the wrong owner. The reads stay outside the chain, so a start that waits on a slow read
+// holds no later start.
+let fenceWrites: Promise<unknown> = Promise.resolve()
 let settings: Settings | undefined
 let bashBounds: { defaultMs?: number; maxMs?: number } = {}
 // The code of the registration's last refusal, while nothing else has been answered since.
@@ -1025,6 +1030,18 @@ async function keepPair($: EngineInterface, pairs: StoredPair[], processId: stri
   }
 }
 
+// A later start owns the identity the relay must read, so each write goes out only while this start is current,
+// checked in the step that issues it.
+async function writeIdentity($: EngineInterface, isCurrent: () => boolean, pair: Identity, held: Identity | undefined,
+  existing: string | undefined, pairs: StoredPair[], processId: string | undefined): Promise<void> {
+  // A pair the fence reused from the host's state is there already.
+  if (pair !== held && isCurrent()) await $.state.set(IDENTITY_REF, pair)
+  if (processId !== undefined && isCurrent()) await keepPair($, pairs, processId, pair)
+  // The owner line replaces any line before it, so the relay reads one owner whatever the variable inherited.
+  if (isCurrent()) await $.env.set('ANTHROPIC_CUSTOM_HEADERS', ownerHeaderLines(existing, pair.owner))
+  if (isCurrent()) await $.env.set('PHOEBIS_KEEPALIVE_INSTANCE', pair.instance)
+}
+
 // The owner the router fences this process's requests by. A reload of the module, an enable or a worker respawn in
 // the same process keeps the pair under any session id of the process, so the router's session keeps its owner, and
 // any other process mints its own.
@@ -1047,14 +1064,11 @@ async function fence($: EngineInterface, isCurrent: () => boolean): Promise<Iden
     pair = stored !== undefined && reusable(stored, variable, owner)
       ? stored
       : { instance: crypto.randomUUID(), owner: crypto.randomUUID() }
-    // A later start owns the identity the relay must read, so each write goes out only while this start is current,
-    // checked in the step that issues it.
-    if (isCurrent()) await $.state.set(IDENTITY_REF, pair)
   }
-  if (processId !== undefined && isCurrent()) await keepPair($, pairs, processId, pair)
-  // The owner line replaces any line before it, so the relay reads one owner whatever the variable inherited.
-  if (isCurrent()) await $.env.set('ANTHROPIC_CUSTOM_HEADERS', ownerHeaderLines(existing, pair.owner))
-  if (isCurrent()) await $.env.set('PHOEBIS_KEEPALIVE_INSTANCE', pair.instance)
+  const run = fenceWrites.then(() => writeIdentity($, isCurrent, pair, held, existing, pairs, processId))
+  // A fence whose writes reject must not stall the ones after it.
+  fenceWrites = run.catch(() => undefined)
+  await run
   return pair
 }
 
