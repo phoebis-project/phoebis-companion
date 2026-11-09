@@ -142,6 +142,8 @@ export type FakeRouter = {
   delayList: (ms: number) => void
   /** Holds the next `$.state.get` of the plugin's tracked work for this long on the clock before it answers. */
   delayModel: (ms: number) => void
+  /** Holds the fence's next read of the stored pairs (`$.store.get`) for this long on the clock before it answers. */
+  delayStore: (ms: number) => void
   /** Denies the next `$.tool.register` with the reason, as an engine that refuses the spec does. */
   denyRegister: (reason: string) => void
   /** Denies the next `$.session.version()` with the reason, as a host that cannot read the client's version does. */
@@ -258,6 +260,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   let idDelayMs = 0
   let listDelayMs = 0
   let modelDelayMs = 0
+  let storeDelayMs = 0
   // The agents the router holds per session, each with its generation.
   const held = new Map<string, Map<string, number>>()
   // The last sequence the router took per session and instance, so a report at or below it is refused as the router
@@ -330,6 +333,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     delayModel: (ms) => {
       modelDelayMs = ms
+    },
+    delayStore: (ms) => {
+      storeDelayMs = ms
     },
     denyRegister: (reason) => {
       registerDenials.push(reason)
@@ -464,8 +470,13 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     router.state = e.value as Identity
     return { value: { isSet: true, version: stateVersion } }
   })
-  on('store.get', (_$, e) => {
+  on('store.get', async (_$, e) => {
     router.reached.push('store.get')
+    if (storeDelayMs > 0) {
+      const ms = storeDelayMs
+      storeDelayMs = 0
+      await clock.sleep(ms)
+    }
     return { value: router.store.get(e.key) }
   })
   on('store.set', (_$, e) => {

@@ -231,6 +231,25 @@ test('a reload under a later session id of the same process reuses the pair the 
     keptInStore(router, PROCESS)
   })
 
+test('a start replaced while its fence reads writes no header lines', CONFIGURED, async ($, on) => {
+  const { clock, router } = processHost(on, { ANTHROPIC_AUTH_TOKEN: KEY }, { process: PROCESS })
+  // The first start's read of the stored pairs answers a second late, and a second start runs to its end meanwhile.
+  router.delayStore(1000)
+  const replaced = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await start($, clock)
+  await clock.advance(1000)
+  await replaced
+  const registration = nth(registrations(router), 0)
+  const pair = { instance: registration.instance_id, owner: ownerOfBody(registration) }
+  expect(router.envWrites).toEqual([
+    { name: HEADERS, value: `X-Keepalive-Owner-Id: ${pair.owner}` },
+    { name: INSTANCE, value: pair.instance },
+  ])
+  expect(router.state).toEqual(pair)
+  expect(router.store.get('identities')).toEqual([[PROCESS, pair]])
+})
+
 test('a child process mints its own pair beside the one the store keeps for its parent', CONFIGURED,
   async ($, on) => {
     const { clock, router } = processHost(on, INHERITED, { process: CHILD, store: { identities: [[PROCESS, HELD]] } })

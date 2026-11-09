@@ -1026,7 +1026,7 @@ async function keepPair($: EngineInterface, pairs: StoredPair[], processId: stri
 // The owner the router fences this process's requests by. A reload of the module, an enable or a worker respawn in
 // the same process keeps the pair under any session id of the process, so the router's session keeps its owner, and
 // any other process mints its own.
-async function fence($: EngineInterface): Promise<Identity> {
+async function fence($: EngineInterface, current: () => boolean): Promise<Identity> {
   const [existing, variable, { value: held }] = await Promise.all([
     $.env.get('ANTHROPIC_CUSTOM_HEADERS'),
     $.env.get('PHOEBIS_KEEPALIVE_INSTANCE'),
@@ -1045,12 +1045,14 @@ async function fence($: EngineInterface): Promise<Identity> {
     pair = stored !== undefined && reusable(stored, variable, owner)
       ? stored
       : { instance: crypto.randomUUID(), owner: crypto.randomUUID() }
-    await $.state.set(IDENTITY_REF, pair)
+    // A later start owns the identity the relay must read, so each write goes out only while this start is current,
+    // checked in the step that issues it.
+    if (current()) await $.state.set(IDENTITY_REF, pair)
   }
-  if (processId !== undefined) await keepPair($, pairs, processId, pair)
+  if (processId !== undefined && current()) await keepPair($, pairs, processId, pair)
   // The owner line replaces any line before it, so the relay reads one owner whatever the variable inherited.
-  await $.env.set('ANTHROPIC_CUSTOM_HEADERS', ownerHeaderLines(existing, pair.owner))
-  await $.env.set('PHOEBIS_KEEPALIVE_INSTANCE', pair.instance)
+  if (current()) await $.env.set('ANTHROPIC_CUSTOM_HEADERS', ownerHeaderLines(existing, pair.owner))
+  if (current()) await $.env.set('PHOEBIS_KEEPALIVE_INSTANCE', pair.instance)
   return pair
 }
 
@@ -1063,7 +1065,7 @@ export async function startKeepalive($: EngineInterface, resolved: Settings, isC
   // The earlier settings hold through every await here. Replaced sooner, they would let a pump register the record of
   // an older id that ensureSession is about to replace.
   const [pair, defaultMs, maxMs] = await Promise.all([
-    fence($),
+    fence($, isCurrent),
     $.env.get('BASH_DEFAULT_TIMEOUT_MS'),
     $.env.get('BASH_MAX_TIMEOUT_MS'),
   ])
