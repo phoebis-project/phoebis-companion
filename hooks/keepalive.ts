@@ -6,6 +6,7 @@ import {
   commandDeadline,
   earliest,
   heartbeatInterval,
+  isParkKind,
   isRealPrompt,
   isRelease,
   isRun,
@@ -187,8 +188,8 @@ function mainAgent(): AgentRecord {
 }
 
 // The crons belong to the session, and the session's loop is main's.
-function cronsOf(agent: AgentRecord): Iterable<Cron> {
-  return agent.id === MAIN ? model.crons.values() : []
+function parkNow(agent: AgentRecord): Park {
+  return parkOf(agent, agent.id === MAIN ? model.crons.values() : [])
 }
 
 function field(value: unknown, name: string): unknown {
@@ -224,7 +225,7 @@ function report(agentId: string, state: AgentRecord['state'], park?: Park): void
 
 // A subagent rests parked on its own open work or not at all: with nothing open, its work went back to its parent.
 function rest(agent: AgentRecord): void {
-  const park = parkOf(agent, cronsOf(agent))
+  const park = parkNow(agent)
   if (agent.id !== MAIN && park.state === 'idle') release(agent.id)
   else report(agent.id, park.state, park)
 }
@@ -237,10 +238,10 @@ function busy(agentId: string): void {
 // Changes what an agent waits on. A busy agent's park is read at the end of its turn and a released one is gone, so
 // only a resting agent is reported here, and only when the park the router holds moved.
 function change(agent: AgentRecord, edit: () => void): void {
-  const before = parkOf(agent, cronsOf(agent))
+  const before = parkNow(agent)
   edit()
   if (model.agents.get(agent.id) !== agent || agent.state === 'busy') return
-  const after = parkOf(agent, cronsOf(agent))
+  const after = parkNow(agent)
   if (!samePark(before, after)) rest(agent)
 }
 
@@ -483,7 +484,7 @@ function reconcileAck(entries: AnsweredAgent[], listed: AgentInfo[] | undefined)
     if (agent !== undefined) {
       // The router lists a parked agent with no park kind once it no longer holds its park.
       const differs = state === 'parked' && agent.state === 'parked'
-        ? park === undefined || !samePark(parkOf(agent, cronsOf(agent)), park)
+        ? park === undefined || !samePark(parkNow(agent), park)
         : state !== agent.state
       if (differs) restate(agent)
       continue
@@ -723,7 +724,7 @@ type Answer = {
 
 function answeredPark(entry: unknown): Park | undefined {
   const kind = field(entry, 'park_kind')
-  if (kind !== 'background' && kind !== 'scheduled' && kind !== 'both') return undefined
+  if (!isParkKind(kind)) return undefined
   const park: Park = { state: 'parked', park_kind: kind }
   const wakeAt = field(entry, 'wake_at')
   if (typeof wakeAt === 'number') park.wake_at = wakeAt

@@ -332,7 +332,6 @@ test('the owner line is read and replaced whatever the case of its name, and eve
 
 test('the held identity is reused only when it names both the variable and the header\'s owner', () => {
   expect(reusable(HELD, 'i-1', 'u-old')).toBe(true)
-  expect(reusable(undefined, 'i-1', 'u-old')).toBe(false)
   expect(reusable(HELD, undefined, 'u-old')).toBe(false)
   expect(reusable(HELD, 'i-1', undefined)).toBe(false)
   expect(reusable(HELD, 'i-2', 'u-old')).toBe(false)

@@ -23,19 +23,19 @@ const OWNER_HEADER = 'X-Keepalive-Owner-Id'
 const HEARTBEAT_MIN_MS = 1000
 const HEARTBEAT_MAX_MS = 25000
 
-type OpenTask = SavedTask
-
 export type Cron = SavedCron
 
 export type AgentRecord = {
   id: string
   parent?: string
   state: SavedAgent['state']
-  open: Map<string, OpenTask>
+  open: Map<string, SavedTask>
   lastPresence: number
 }
 
-type ParkFields = { park_kind: 'background' | 'scheduled' | 'both'; wake_at?: number; deadline?: number }
+const PARK_KINDS = ['background', 'both', 'scheduled'] as const
+
+type ParkFields = { park_kind: (typeof PARK_KINDS)[number]; wake_at?: number; deadline?: number }
 
 export type Park = { state: 'idle' } | ({ state: 'parked' } & ParkFields)
 
@@ -63,13 +63,14 @@ const TIMER_MAX_MS = 2147483647
 // The client's own bound on its walk to the next match: as many steps as a leap year has minutes.
 const CRON_STEPS = 527040
 // The bounds of minute, hour, day of month, month and day of week.
-const CRON_FIELDS = [
+const CRON_FIELDS: readonly CronBounds[] = [
   { min: 0, max: 59 },
   { min: 0, max: 23 },
   { min: 1, max: 31 },
   { min: 1, max: 12 },
-  { min: 0, max: 6 },
-] as const
+  // The day of week also takes 7 for Sunday.
+  { min: 0, max: 7, wrap: 7 },
+]
 
 // A line of ANTHROPIC_CUSTOM_HEADERS as the client reads it: the name before the first colon, the value after it.
 function headerLine(line: string): { name: string; value: string } | undefined {
@@ -98,10 +99,8 @@ export function ownerHeaderLines(existing: string | undefined, uuid: string): st
 // The variables alone are inherited by every process this one starts, so only a record kept for this process, the
 // host's state for the session or the store's entry under the process's identity, shows that this load runs where the
 // pair was minted.
-export function reusable(held: Identity | undefined, variable: string | undefined,
-  headerOwner: string | undefined): boolean {
-  return held !== undefined && variable !== undefined && headerOwner !== undefined &&
-    held.instance === variable && held.owner === headerOwner
+export function reusable(held: Identity, variable: string | undefined, headerOwner: string | undefined): boolean {
+  return variable !== undefined && headerOwner !== undefined && held.instance === variable && held.owner === headerOwner
 }
 
 // From the clock, so a record that starts over after a reload or a return to an earlier id is never behind the
@@ -138,8 +137,7 @@ export function collapse(queue: Report[], report: Report): Report[] {
       // A run queued after a release never reached the router, so a second release drops that run and keeps the
       // first release, which ends what the router holds.
       if (report.state === 'released' && released >= 0) {
-        return queue.filter((queued, at) => at <= released ||
-          !(sameAgent(queued, 'state', report.agent_id) || sameAgent(queued, 'agent_start', report.agent_id)))
+        return queue.filter((queued, at) => at <= released || !isRun(queued, report.agent_id))
       }
       // A queued release stays ahead of the agent's next state, since without it the router would be asked to start
       // an agent it still holds.
@@ -209,8 +207,8 @@ export function heartbeatInterval(leaseExpiresMs: number, nowMs: number): number
   return Math.min(HEARTBEAT_MAX_MS, Math.max(HEARTBEAT_MIN_MS, Math.floor((leaseExpiresMs - nowMs) / 3)))
 }
 
-export function isRealPrompt(origin: { kind: string } | undefined): boolean {
-  return origin !== undefined && REAL_PROMPTS.has(origin.kind)
+export function isRealPrompt(origin: { kind: string }): boolean {
+  return REAL_PROMPTS.has(origin.kind)
 }
 
 function positive(value: number | undefined): number | undefined {
@@ -221,39 +219,42 @@ function positive(value: number | undefined): number | undefined {
 // router reads whole milliseconds, so a fractional timeout rounds up, as the cron times do.
 export function commandDeadline(startedAt: number, timeoutMs: number | undefined,
   env: { defaultMs?: number; maxMs?: number }): number {
-  const base = positive(env.defaultMs) ?? BASH_DEFAULT_MS
+  const base = env.defaultMs ?? BASH_DEFAULT_MS
   const limit = Math.max(DEFAULT_COMMAND_TIMEOUT_MS, base)
-  const ceiling = Math.max(positive(env.maxMs) ?? BASH_MAX_MS, base)
+  const ceiling = Math.max(env.maxMs ?? BASH_MAX_MS, base)
   const cap = Math.min(Math.max(MAX_COMMAND_TIMEOUT_MS, ceiling), TIMER_MAX_MS)
   return Math.ceil(startedAt + Math.min(positive(timeoutMs) ?? limit, cap))
 }
 
+type CronBounds = { min: number; max: number; wrap?: number }
+
 // One field of a cron expression as the client's own parser reads it, or nothing when the client would refuse it.
-function cronField(text: string, bounds: { min: number; max: number }): Set<number> | undefined {
-  const { min, max } = bounds
-  // The day of week also takes 7 for Sunday.
-  const weekday = min === 0 && max === 6
+function cronField(text: string, bounds: CronBounds): Set<number> | undefined {
+  const { min, max, wrap } = bounds
   const values = new Set<number>()
+  const add = (value: number): void => {
+    values.add(wrap === undefined ? value : value % wrap)
+  }
   for (const part of text.split(',')) {
     const every = /^\*(?:\/(\d+))?$/.exec(part)
     if (every !== null) {
       const step = every[1] === undefined ? 1 : Number(every[1])
       if (step < 1) return undefined
-      for (let value = min; value <= max; value += step) values.add(value)
+      for (let value = min; value <= max; value += step) add(value)
       continue
     }
     const range = /^(\d+)-(\d+)(?:\/(\d+))?$/.exec(part)
     if (range !== null) {
       const [from, to] = [Number(range[1]), Number(range[2])]
       const step = range[3] === undefined ? 1 : Number(range[3])
-      if (from > to || step < 1 || from < min || to > (weekday ? 7 : max)) return undefined
-      for (let value = from; value <= to; value += step) values.add(weekday && value === 7 ? 0 : value)
+      if (from > to || step < 1 || from < min || to > max) return undefined
+      for (let value = from; value <= to; value += step) add(value)
       continue
     }
     if (!/^\d+$/.test(part)) return undefined
-    const value = weekday && Number(part) === 7 ? 0 : Number(part)
+    const value = Number(part)
     if (value < min || value > max) return undefined
-    values.add(value)
+    add(value)
   }
   return values.size === 0 ? undefined : values
 }
@@ -313,6 +314,10 @@ function idShare(id: string): number {
   return Number.isFinite(share) ? share : 0
 }
 
+function onHalfHour(ms: number): boolean {
+  return new Date(ms).getMinutes() % ONE_SHOT_MINUTE_MOD === 0
+}
+
 // When the client fires a cron next, counted from its creation or its last fire, as its scheduler computes it.
 export function nextFireAt(expression: string, baseMs: number, id: string, recurring: boolean): number | undefined {
   const sets = cronSets(expression)
@@ -320,7 +325,7 @@ export function nextFireAt(expression: string, baseMs: number, id: string, recur
   const grid = matchAfter(sets, baseMs)
   if (grid === undefined) return undefined
   if (!recurring) {
-    if (new Date(grid).getMinutes() % ONE_SHOT_MINUTE_MOD !== 0) return grid
+    if (!onHalfHour(grid)) return grid
     return Math.ceil(Math.max(grid - idShare(id) * ONE_SHOT_MAX_MS, baseMs))
   }
   const after = matchAfter(sets, grid)
@@ -329,6 +334,10 @@ export function nextFireAt(expression: string, baseMs: number, id: string, recur
   if (LOOP_EXPRESSION.test(expression) && CACHE_LEAD_MS < period && period >= LOOP_PERIOD_MS &&
     period - CACHE_LEAD_MS < LOOP_PERIOD_MS) return baseMs + period - CACHE_LEAD_MS
   return Math.ceil(grid + Math.min(idShare(id) * RECURRING_SHARE * period, RECURRING_CAP_MS))
+}
+
+export function isParkKind(value: unknown): value is ParkFields['park_kind'] {
+  return PARK_KINDS.some((kind) => kind === value)
 }
 
 export function parkOf(agent: AgentRecord, crons: Iterable<Cron>): Park {
@@ -362,7 +371,6 @@ export function samePark(a: Park, b: Park): boolean {
 // The first time the client may fire a wake. A cron's is computed exactly. A wakeup's task id never reaches the mod,
 // so on :00 or :30 it may fire anywhere the one-shot rule allows, up to 90 s early and never before its creation.
 export function earliest(cron: Cron): number {
-  const onHalfHour = new Date(cron.wakeAt).getMinutes() % ONE_SHOT_MINUTE_MOD === 0
-  if (cron.expression !== undefined || !onHalfHour) return cron.wakeAt
+  if (cron.expression !== undefined || !onHalfHour(cron.wakeAt)) return cron.wakeAt
   return Math.max(cron.wakeAt - ONE_SHOT_MAX_MS, cron.createdAt)
 }
