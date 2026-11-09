@@ -594,6 +594,19 @@ test('a tick already reading the id when the session ends does not revive it', C
   expect(events(router)).toEqual(['session_start', 'session_end'])
 })
 
+test('an ended session\'s timer never registers the successor id', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  await end($, clock, 'clear', 'session-a')
+  router.setId('session-b')
+  // Past the heartbeat the registration's answer scheduled, with no prompt to read the new id.
+  await clock.advance(30000)
+  expect(router.requests.map((body) => [body.event, body.session_id])).toEqual([
+    ['session_start', 'session-a'],
+    ['session_end', 'session-a'],
+  ])
+})
+
 test('a registration refused twice in a row with the same code waits the backoff before it is sent again',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
@@ -795,6 +808,31 @@ test('a report on the wire at a key change does not refuse the new key', CONFIGU
   expect(events(router).slice(2)).toEqual(['session_start'])
   expect(router.headers.slice(2).map((headers) => headers.Authorization)).toEqual(['Bearer K2'])
 })
+
+test('a prompt whose chain finishes while the settings are cleared queues nothing for the next start', CONFIGURED,
+  async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    await start($, clock)
+    // The hooks beneath hold the prompt two seconds, and a start with no key clears the settings meanwhile.
+    router.answerSubmit(async () => {
+      await clock.sleep(2000)
+      return { text: 'hi' }
+    })
+    const held = $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    variables.delete('ANTHROPIC_AUTH_TOKEN')
+    await start($, clock)
+    await clock.advance(2000)
+    await held
+    await clock.settle()
+    // The fake answers the start's GET 200 by default, so the check passes under the key put back.
+    variables.set('ANTHROPIC_AUTH_TOKEN', KEY)
+    await start($, clock)
+    expect(events(router)).toEqual(['session_start', 'session_start'])
+  })
 
 test('a start under a new id never registers the old id a pump finds first', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on)
