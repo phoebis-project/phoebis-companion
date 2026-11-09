@@ -35,7 +35,14 @@ export const register: Register = (on, options) => {
     retireStarts()
   }
 
-  if (config.keepalive) installKeepalive(on)
+  if (config.keepalive) {
+    // The events route and the allowance route share the key, each under its own permission, so a 403 can withhold
+    // the keepalive while the allowance stays readable, and only a 401 refuses the key for both. A start whose check
+    // is still out holds settings of its own, so a refusal of the settings it replaced leaves that start current.
+    installKeepalive(on, (status, under) => {
+      if (status === 401 && current === under) current = undefined
+    })
+  }
 
   on('tool.call', { tool: TOOL_CALL }, async ($) => {
     const sessionId = await $.session.id()

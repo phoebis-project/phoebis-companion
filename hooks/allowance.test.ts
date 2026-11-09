@@ -466,6 +466,54 @@ test('a key refused at a later start leaves nothing reported under the key an ea
     ])
   })
 
+test('a 401 on the events route leaves the tool unconfigured', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  router.answer(() => ({ status: 401 }))
+  await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+  await clock.settle()
+  await clock.advance(10_000)
+  const answer = await call($)
+  expect(answer.isError).toBe(true)
+  expect(router.gets).toHaveLength(1)
+})
+
+test('a 403 on the events route leaves the tool reading', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  router.answer(() => ({ status: 403 }))
+  await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+  await clock.settle()
+  await clock.advance(10_000)
+  expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
+  expect(router.gets).toHaveLength(2)
+})
+
+test('a 401 on a report sent under the settings a start replaced leaves the start in flight current', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    // The refusal lands while the second start's GET is out, before that start installs its own settings.
+    router.answer(async () => {
+      await clock.sleep(1000)
+      return { status: 401 }
+    })
+    router.answerGet(async () => {
+      await clock.sleep(2000)
+      return { status: 200, body: SAMPLE_ALLOWANCE }
+    })
+    await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    const held = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    await clock.advance(1000)
+    await clock.advance(1000)
+    await held
+    await clock.settle()
+    expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'activity', 'session_start'])
+    expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
+  })
+
 test('a valid key at a later start under the same session id sends nothing queued before a refused start', CONFIGURED,
   async ($, on) => {
     const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'k-a']])

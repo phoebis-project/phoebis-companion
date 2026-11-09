@@ -105,6 +105,8 @@ let startRefusal: unknown
 let session: SessionRecord | undefined
 const queue: Queue = { reports: [], attempt: 0, deferred: new Map() }
 let timer: Timer | undefined
+// The start hook holds the settings the allowance tool reads under, so it decides what a refusal does to them.
+let onRefused: (status: number, under: Settings) => void = () => undefined
 // The tracked work as the host last took it, so a pump writes it only when it changed.
 let savedModel: string | undefined
 // The reports already sent again under a generation the router named, so a second refusal drops them.
@@ -704,7 +706,7 @@ async function pump($: EngineInterface): Promise<void> {
     const kept = still?.record === record && still.config.url === config.url && still.config.key === config.key
     const stale = still?.config !== config && response !== undefined &&
       (response.status === 401 || response.status === 403)
-    if (kept && !stale) settle($, record, report, response, now, listed)
+    if (kept && !stale) settle($, config, record, report, response, now, listed)
   } catch {
     return
   }
@@ -764,8 +766,8 @@ function answerOf(text: string): Answer {
   return answer
 }
 
-function settle($: EngineInterface, record: SessionRecord, report: Report, response: HttpResponse | undefined,
-  now: number, listed: AgentInfo[] | undefined): void {
+function settle($: EngineInterface, config: Settings, record: SessionRecord, report: Report,
+  response: HttpResponse | undefined, now: number, listed: AgentInfo[] | undefined): void {
   const repeated = startRefusal
   startRefusal = undefined
   // The router's agent limit refuses one agent's start, not the session: that agent waits under its own retry time
@@ -793,6 +795,7 @@ function settle($: EngineInterface, record: SessionRecord, report: Report, respo
     timer?.cancel()
     say($, `the router refused the key with status ${response.status}, so this process reports nothing until a ` +
       'start\'s check accepts the key', { to: 'debug' })
+    onRefused(response.status, config)
     return
   }
   if (response.status === 409) {
@@ -1084,7 +1087,8 @@ export function clearSettings(): void {
   settings = undefined
 }
 
-export function installKeepalive(on: On): void {
+export function installKeepalive(on: On, refused: (status: number, under: Settings) => void): void {
+  onRefused = refused
   on('prompt.submit', async ($, e, next) => {
     if (!active()) return next(e)
     await ensureSession($, () => true)
