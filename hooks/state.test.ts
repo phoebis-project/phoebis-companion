@@ -320,6 +320,22 @@ test('a recurring cron fires its grid time plus the delay its id gives, from the
     ])
   })
 
+test('a scheduled prompt a lower hook drops still advances its cron', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on, local(14, 10, 0))
+  await start($, clock)
+  await submit($, clock, 'composer')
+  await call($, clock, router, { tool: 'CronCreate', cron: '0 * * * *', prompt: 'hourly' },
+    { id: 'c0000000', humanSchedule: 'Every hour', recurring: true })
+  await complete($, clock)
+  await clock.set(local(14, 11, 22, 30))
+  router.answerSubmit(() => ({ drop: 'no' }))
+  await submit($, clock, 'scheduled-trigger', 'hourly')
+  expect(states(router)).toEqual([
+    `state main parked scheduled ${local(14, 11, 22, 30)}`,
+    `state main parked scheduled ${local(14, 12, 22, 30)}`,
+  ])
+})
+
 test('an every-minute cron advances a minute per fire, and a trigger between fires leaves it', CONFIGURED,
   async ($, on) => {
     const { clock, router } = host(on, local(14, 9, 59, 30))
@@ -1398,6 +1414,43 @@ test('a prompt typed during main\'s turn keeps the commands that turn started', 
     'state main busy',
     'state main idle',
   ])
+})
+
+test('a prompt a lower hook drops leaves main\'s state and commands as they were', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  await submit($, clock, 'composer')
+  await call($, clock, router, ...bash('bg-1', 60000))
+  await complete($, clock)
+  const settled = told(router).length
+  router.answerSubmit(() => ({ drop: 'no' }))
+  await submit($, clock, 'composer')
+  // The router lost the session, so the tick registers again, and the mod restates main where the answer's busy
+  // differs from what it holds.
+  router.answer(() => ({ status: 409, body: { code: 'unknown_instance' } }))
+  await clock.advance(25000)
+  expect(told(router).slice(settled)).toEqual(['session_start', `state main parked background ${T0 + 60000}`])
+})
+
+test('a prompt whose chain finishes after a clear changes nothing', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  // The hooks beneath hold the prompt for two seconds, and the person clears the conversation meanwhile.
+  router.answerSubmit(async () => {
+    await clock.sleep(2000)
+    return { text: 'hi' }
+  })
+  const held = $.prompt.submit({ text: 'hi', origin: { kind: 'composer' } as { kind: 'composer' }, wait: false })
+  await clock.settle()
+  await end($, clock, 'clear', 'session-a')
+  router.setId('session-b')
+  await clock.advance(2000)
+  await held
+  await clock.settle()
+  expect(under(router, 'session-a')).toEqual(['session_start', 'session_end'])
+  expect(under(router, 'session-b')).toEqual([])
+  await submit($, clock, 'composer')
+  expect(under(router, 'session-b')).toEqual(['session_start', 'activity main prompt'])
 })
 
 test('an agent the list names only after its first step is judged again at its spawn and at the tick', CONFIGURED,

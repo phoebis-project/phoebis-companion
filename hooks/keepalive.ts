@@ -1057,29 +1057,31 @@ export function clearSettings(): void {
 
 export function installKeepalive(on: On): void {
   on('prompt.submit', async ($, e, next) => {
-    if (active()) {
-      await ensureSession($, () => true)
-      if (live()) {
-        if (e.origin.kind === 'scheduled-trigger') {
-          fired(await $.clock.now())
-        } else if (isRealPrompt(e.origin)) {
-          // The router marks main busy on the prompt itself, so no state report goes with it.
-          queue.reports = collapse(queue.reports, { event: 'activity', agent_id: MAIN, kind: 'prompt' })
-          const main = mainAgent()
-          main.state = 'busy'
-          model.turning.add(MAIN)
-          // The person's return ends main's wait on every command its earlier turns started, still running or
-          // not, so a long-running one such as a dev server parks main only until then. A prompt typed into the
-          // running turn keeps the commands that turn started, since they are seconds old.
-          const keep = e.turnId === undefined ? new Set<string>() : model.current
-          for (const task of [...main.open.values()]) {
-            if (task.kind === 'command' && !keep.has(task.id)) main.open.delete(task.id)
-          }
-        }
+    if (!active()) return next(e)
+    await ensureSession($, () => true)
+    // The client fired the cron whatever a hook beneath does with the prompt the fire raised.
+    if (live() && e.origin.kind === 'scheduled-trigger') fired(await $.clock.now())
+    void pump($)
+    // A prompt a hook beneath drops never starts a turn, and one whose chain finishes after a clear or a resume
+    // replaced the session belongs to the session it was typed into.
+    const record = session
+    const r = await next(e)
+    if (r.drop === undefined && live() && session === record && isRealPrompt(e.origin)) {
+      // The router marks main busy on the prompt itself, so no state report goes with it.
+      queue.reports = collapse(queue.reports, { event: 'activity', agent_id: MAIN, kind: 'prompt' })
+      const main = mainAgent()
+      main.state = 'busy'
+      model.turning.add(MAIN)
+      // The person's return ends main's wait on every command its earlier turns started, still running or not, so a
+      // long-running one such as a dev server parks main only until then. A prompt typed into the running turn keeps
+      // the commands that turn started, since they are seconds old.
+      const keep = e.turnId === undefined ? new Set<string>() : model.current
+      for (const task of [...main.open.values()]) {
+        if (task.kind === 'command' && !keep.has(task.id)) main.open.delete(task.id)
       }
       void pump($)
     }
-    return next(e)
+    return r
   }).catch(($, e, next) => next(e))
 
   // Presence resets the router's idle clock and nothing else. The hook's budget is short, so it only queues.

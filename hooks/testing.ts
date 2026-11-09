@@ -6,6 +6,7 @@ import type {
   HttpResponse,
   On,
   PromptEditResult,
+  PromptSubmitResult,
   RegisteredToolSpec,
   SessionVersion,
 } from 'claude-code'
@@ -129,6 +130,12 @@ export type FakeRouter = {
    * A function that throws stands for a lower hook that rejects the edit.
    */
   answerEdit: (fn: () => PromptEditResult) => void
+  /**
+   * Scripts what the next `prompt.submit` resolves to beneath the mod, and several calls answer the next prompts in
+   * turn. A `{ drop }` stands for a lower hook that stops the prompt, and a function that answers a promise holds the
+   * prompt until it settles, as a settings hook that runs for a while does.
+   */
+  answerSubmit: (fn: () => PromptSubmitResult | Promise<PromptSubmitResult>) => void
   /** Holds the next `$.session.id()` for this long on the clock before it answers. */
   delayId: (ms: number) => void
   /** Holds the next `$.agent.list()` for this long on the clock before it answers. */
@@ -245,6 +252,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const tools: ((e: { tool: string }) => unknown)[] = []
   const spawns: (() => { agentId: string } | Promise<{ agentId: string }>)[] = []
   const edits: (() => PromptEditResult)[] = []
+  const submits: (() => PromptSubmitResult | Promise<PromptSubmitResult>)[] = []
   const registerDenials: string[] = []
   const versionDenials: string[] = []
   let idDelayMs = 0
@@ -310,6 +318,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     answerEdit: (fn) => {
       edits.push(fn)
+    },
+    answerSubmit: (fn) => {
+      submits.push(fn)
     },
     delayId: (ms) => {
       idDelayMs = ms
@@ -506,7 +517,10 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
 
   // The engine's own answers: what each event's bottom resolves to when nothing beneath the plugins rewrites it.
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
-  on('prompt.submit', (_$, e) => ({ text: e.text, context: e.context }))
+  on('prompt.submit', (_$, e) => {
+    const scripted = submits.shift()
+    return scripted === undefined ? { text: e.text, context: e.context } : scripted()
+  })
   on('prompt.edit', (_$, e) => {
     const scripted = edits.shift()
     return scripted === undefined ? { text: e.text, cursor: e.cursor } : scripted()
