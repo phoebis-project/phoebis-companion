@@ -1,41 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Phoebis Companion">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Phoebis Companion">
   <title>Phoebis Companion</title>
-  <!-- Phoebis Router's Pixel butterfly, reduced, above and right of a pixel prompt: the companion lives in the session -->
-  <g transform="translate(1.25 10.25) scale(0.75)">
-    <rect x="54" y="6" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="102" y="6" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="66" y="18" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="90" y="18" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="42" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="54" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="78" y="30" width="10" height="10" rx="2.5" fill="#FFD23F"/>
-    <rect x="102" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="114" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="42" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="54" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="66" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="78" y="42" width="10" height="10" rx="2.5" fill="#FFD23F"/>
-    <rect x="90" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="102" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="114" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="42" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="54" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="66" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="78" y="54" width="10" height="10" rx="2.5" fill="#FFD23F"/>
-    <rect x="90" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="102" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="114" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="54" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="66" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="78" y="66" width="10" height="10" rx="2.5" fill="#FFD23F"/>
-    <rect x="90" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="102" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="66" y="78" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="78" y="78" width="10" height="10" rx="2.5" fill="#FFD23F"/>
-    <rect x="90" y="78" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="6" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="18" y="78" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="6" y="90" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="30" y="96" width="10" height="4" rx="2" fill="#FFD23F"/>
-  </g>
+  <defs>
+    <linearGradient id="companion-dark-a" gradientUnits="userSpaceOnUse" x1="58.44" y1="70.411" x2="10.78" y2="57.929"><stop offset="0" stop-color="#FFAE2B"/><stop offset="1" stop-color="#FF7F2A"/></linearGradient>
+    <linearGradient id="companion-dark-b" gradientUnits="userSpaceOnUse" x1="28.936" y1="10.27" x2="60.709" y2="69.277"><stop offset="0" stop-color="#FFD84A"/><stop offset="1" stop-color="#FFAE2B"/></linearGradient>
+  </defs>
+  <path d="M58.44 70.411L36.347 45.191A15.887 15.887 0 1 0 24.931 71.537Z" fill="url(#companion-dark-a)"/>
+  <path d="M60.709 69.277L60.709 28.426A20.426 20.426 0 1 0 28.028 44.766Z" fill="url(#companion-dark-b)"/>
+  <path d="M51.194 62.141L36.347 45.191A15.887 15.887 0 0 0 23.325 39.809A20.426 20.426 0 0 0 28.028 44.766Z" fill="#F0503C"/>
+  <path d="M68.652 68.142Q74.326 60.199 74.326 49.986" fill="none" stroke="#F2F3F5" stroke-width="2.95" stroke-linecap="round"/>
+  <circle cx="74.326" cy="49.986" r="2.95" fill="#F2F3F5"/>
+  <path d="M69.787 69.277Q80 64.738 84.539 55.66" fill="none" stroke="#F2F3F5" stroke-width="2.95" stroke-linecap="round"/>
+  <circle cx="84.539" cy="55.66" r="2.95" fill="#F2F3F5"/>
+  <path d="M42.553 84.028L67.518 70.411" fill="none" stroke="#F2F3F5" stroke-width="7.943" stroke-linecap="round"/>
 </svg>

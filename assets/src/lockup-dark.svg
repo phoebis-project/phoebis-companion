@@ -1,47 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-label="Phoebis Companion">
   <title>Phoebis Companion</title>
 
-  <!-- Editable master of the square lockup (the listing icon and the social preview). The wordmark needs Audiowide
-       installed (SIL Open Font License, fonts.google.com/specimen/Audiowide). Regenerate the self-contained copy:
+  <!-- Editable master. The wordmark needs Audiowide installed (SIL Open Font License,
+       fonts.google.com/specimen/Audiowide). Regenerate the self-contained copy for a listing icon or a social preview:
        rsvg-convert -f svg lockup-dark.svg -o ../lockup-dark.svg -->
+  <!-- The mark: the butterfly of Phoebis Router seen from the side, with the same wing lobes and the same shared
+       region. -->
   <rect width="1000" height="1000" fill="#111318"/>
-  <g transform="translate(110 94) scale(6)">
-    <rect x="54" y="6" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="102" y="6" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="66" y="18" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="90" y="18" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="42" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="54" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="78" y="30" width="10" height="10" rx="2.5" fill="#FFD23F"/>
-    <rect x="102" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="114" y="30" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="42" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="54" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="66" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="78" y="42" width="10" height="10" rx="2.5" fill="#FFD23F"/>
-    <rect x="90" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="102" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="114" y="42" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="42" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="54" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="66" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="78" y="54" width="10" height="10" rx="2.5" fill="#FFD23F"/>
-    <rect x="90" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="102" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="114" y="54" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="54" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="66" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="78" y="66" width="10" height="10" rx="2.5" fill="#FFD23F"/>
-    <rect x="90" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="102" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="66" y="78" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="78" y="78" width="10" height="10" rx="2.5" fill="#FFD23F"/>
-    <rect x="90" y="78" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="6" y="66" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="18" y="78" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="6" y="90" width="10" height="10" rx="2.5" fill="#F2F3F5"/>
-    <rect x="30" y="96" width="10" height="4" rx="2" fill="#FFD23F"/>
-  </g>
-
+  <defs>
+    <linearGradient id="companion-dark-a" gradientUnits="userSpaceOnUse" x1="562.638" y1="532.468" x2="276.681" y2="457.574"><stop offset="0" stop-color="#FFAE2B"/><stop offset="1" stop-color="#FF7F2A"/></linearGradient>
+    <linearGradient id="companion-dark-b" gradientUnits="userSpaceOnUse" x1="385.617" y1="171.617" x2="576.255" y2="525.66"><stop offset="0" stop-color="#FFD84A"/><stop offset="1" stop-color="#FFAE2B"/></linearGradient>
+  </defs>
+  <path d="M562.638 532.468L430.082 381.149A95.319 95.319 0 1 0 361.584 539.223Z" fill="url(#companion-dark-a)"/>
+  <path d="M576.255 525.66L576.255 280.553A122.553 122.553 0 1 0 380.17 378.596Z" fill="url(#companion-dark-b)"/>
+  <path d="M519.167 482.843L430.082 381.149A95.319 95.319 0 0 0 351.947 348.856A122.553 122.553 0 0 0 380.17 378.596Z" fill="#F0503C"/>
+  <path d="M623.915 518.851Q657.957 471.191 657.957 409.915" fill="none" stroke="#F2F3F5" stroke-width="17.702" stroke-linecap="round"/>
+  <circle cx="657.957" cy="409.915" r="17.702" fill="#F2F3F5"/>
+  <path d="M630.723 525.66Q692 498.426 719.234 443.957" fill="none" stroke="#F2F3F5" stroke-width="17.702" stroke-linecap="round"/>
+  <circle cx="719.234" cy="443.957" r="17.702" fill="#F2F3F5"/>
+  <path d="M467.319 614.17L617.106 532.468" fill="none" stroke="#F2F3F5" stroke-width="47.66" stroke-linecap="round"/>
   <text x="500" y="840" text-anchor="middle" font-family="Audiowide" font-size="72" fill="#F2F3F5">Phoebis Companion</text>
 </svg>
