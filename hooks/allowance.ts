@@ -49,7 +49,9 @@ type Fetched = { status: number; text: string } | { failure: string }
 /** What the start check does with the answer, or `stale` when a later start began while its GET was out. */
 type StartOutcome = 'register' | 'not_permitted' | 'refused' | 'stale' | 'unreachable'
 
-type ToolAnswer = { result: { content: { type: 'text'; text: string }[]; isError?: true } }
+// The engine refuses a registered tool's result that is neither a string nor a list of content blocks, so an MCP
+// envelope never reaches the model. A failure goes out as a deny, which the model reads as an error result.
+type ToolAnswer = { result: string } | { deny: string }
 
 const NOT_PERMITTED = 'this key may not read the allowance'
 
@@ -109,15 +111,15 @@ function unreachable(fetched: Fetched, settings: Settings): string {
 }
 
 function answer(text: string): ToolAnswer {
-  return { result: { content: [{ type: 'text', text }] } }
+  return { result: text }
 }
 
 export function errorAnswer(text: string): ToolAnswer {
-  return { result: { content: [{ type: 'text', text }], isError: true } }
+  return { deny: text }
 }
 
 /**
- * The tool's answer: this session's cached body inside CACHE_MS, else one bounded GET, a failure as text with isError.
+ * The tool's answer: this session's cached body inside CACHE_MS, else one bounded GET, a failure as a deny.
  */
 export async function answerCall($: EngineInterface, settings: Settings, sessionId: string, now: number):
   Promise<ToolAnswer> {

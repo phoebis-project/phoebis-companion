@@ -13,7 +13,7 @@ const OTHER_ALLOWANCE = { ...SAMPLE_ALLOWANCE, now: '2026-11-08T12:00:05Z' }
 const PAGE = '<!doctype html><title>Phoebis</title>'
 const TOOL_CALL = 'mcp__phoebis-companion__allowance'
 
-type Result = { content: { type: 'text'; text: string }[]; isError?: true }
+type Answer = { result?: string; deny?: string }
 
 function host(on: On, key = KEY): { clock: MockClock; router: FakeRouter } {
   mock.env(on, { ANTHROPIC_AUTH_TOKEN: key })
@@ -28,11 +28,11 @@ async function start($: Engine, clock: MockClock): Promise<void> {
 
 let calls = 0
 
-async function call($: Engine): Promise<Result> {
+async function call($: Engine): Promise<Answer> {
   calls += 1
   const answer = await $.tool.call({ tool: TOOL_CALL, tool_use_id: `toolu_${calls}` } as
     Parameters<Engine['tool']['call']>[0])
-  return answer.result as Result
+  return answer as Answer
 }
 
 test('the allowance GET joins the path prefix and carries the bearer',
@@ -93,13 +93,13 @@ test('a 200 registers the tool once and a second call inside ten seconds answers
     expect(router.tools).toHaveLength(1)
     expect(router.tools[0]).toMatchObject({ name: 'allowance', isDeferred: false })
     await clock.set(T0 + 9999)
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
+    expect(await call($)).toEqual({ result: SAMPLE_TEXT })
     expect(router.gets).toHaveLength(1)
     await clock.set(T0 + 10000)
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
+    expect(await call($)).toEqual({ result: SAMPLE_TEXT })
     expect(router.gets).toHaveLength(2)
     await clock.set(T0 + 12_000)
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
+    expect(await call($)).toEqual({ result: SAMPLE_TEXT })
     expect(router.gets).toHaveLength(2)
   })
 
@@ -115,8 +115,7 @@ test('a start GET that fails registers the tool and a call answers the redacted 
     expect(router.logs[0]).toMatchObject({ to: 'transcript' })
     expect(router.logs[0]?.text).toContain(ROUTER)
     const answer = await call($)
-    expect(answer.isError).toBe(true)
-    expect(answer.content[0]?.text).toContain('connection refused')
+    expect(answer.deny).toContain('connection refused')
     for (const text of [JSON.stringify(router.logs), JSON.stringify(router.toasts), JSON.stringify(answer)]) {
       expect(text).not.toContain(sentinel)
     }
@@ -132,20 +131,18 @@ test('a 200 that is not the allowance registers the tool and a call answers the 
     expect(router.logs.map((line) => line.to)).toEqual(['transcript'])
     expect(router.logs[0]?.text).toContain('not the allowance')
     const answer = await call($)
-    expect(answer.isError).toBe(true)
-    expect(answer.content[0]?.text).toContain('not the allowance')
+    expect(answer.deny).toContain('not the allowance')
   })
 
 test('a reload whose start GET fails answers the error text, not the earlier body', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on)
   await start($, clock)
-  expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
+  expect(await call($)).toEqual({ result: SAMPLE_TEXT })
   router.answerGet(() => ({ fail: 'connection refused' }))
   router.answerGet(() => ({ fail: 'connection refused' }))
   await start($, clock)
   const answer = await call($)
-  expect(answer.isError).toBe(true)
-  expect(answer.content[0]?.text).toContain('connection refused')
+  expect(answer.deny).toContain('connection refused')
 })
 
 test('a call GET that lands after a later start under another URL refilled the cache leaves the later body cached',
@@ -167,7 +164,7 @@ test('a call GET that lands after a later start under another URL refilled the c
     await start($, clock)
     await clock.advance(1_000)
     await pending
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
+    expect(await call($)).toEqual({ result: JSON.stringify(OTHER_ALLOWANCE) })
     expect(router.gets).toHaveLength(3)
   })
 
@@ -194,7 +191,7 @@ test('an overtaken start leaves the reports and the tool to the later start unde
     expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'activity'])
     expect(router.headers.map((headers) => headers.Authorization)).toEqual(['Bearer k-b', 'Bearer k-b'])
     expect(router.tools).toHaveLength(1)
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
+    expect(await call($)).toEqual({ result: JSON.stringify(OTHER_ALLOWANCE) })
   })
 
 test('a start with no key during an earlier start\'s GET leaves nothing reported and the tool unconfigured',
@@ -218,7 +215,7 @@ test('a start with no key during an earlier start\'s GET leaves nothing reported
     const answer = await call($)
     expect(router.requests).toEqual([])
     expect(router.tools).toEqual([])
-    expect(answer.isError).toBe(true)
+    expect(answer).toEqual({ deny: expect.any(String) })
     expect(router.gets).toHaveLength(1)
   })
 
@@ -301,7 +298,7 @@ test('a start whose lifecycle fence throws after a later start took over leaves 
     await clock.settle()
     expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'activity'])
     expect(router.headers.map((headers) => headers.Authorization)).toEqual(['Bearer k-b', 'Bearer k-b'])
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
+    expect(await call($)).toEqual({ result: JSON.stringify(OTHER_ALLOWANCE) })
   })
 
 test('a start that set current last and then throws in its fence leaves no configuration behind', async ($, on) => {
@@ -330,7 +327,7 @@ test('a start that set current last and then throws in its fence leaves no confi
   await clock.settle()
   const answer = await call($)
   expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
-  expect(answer.isError).toBe(true)
+  expect(answer).toEqual({ deny: expect.any(String) })
   expect(router.gets).toHaveLength(2)
 })
 
@@ -359,7 +356,7 @@ test('a start that resolves no key after a later start began leaves the later co
     await clock.settle()
     expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'activity'])
     expect(router.headers.map((headers) => headers.Authorization)).toEqual(['Bearer k-b', 'Bearer k-b'])
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: JSON.stringify(OTHER_ALLOWANCE) }] })
+    expect(await call($)).toEqual({ result: JSON.stringify(OTHER_ALLOWANCE) })
   })
 
 test('a call whose session id read a later start overtook reads under the later start\'s URL',
@@ -418,14 +415,14 @@ test('a call whose GET passes the limit answers an error at the limit and caches
       return { status: 200, body: SAMPLE_ALLOWANCE }
     })
     let settledAt: number | undefined
-    let answer: Result | undefined
+    let answer: Answer | undefined
     const called = call($).then((result) => {
       answer = result
       settledAt = clock.now()
     })
     await clock.advance(3_000)
     expect(settledAt).toBe(T0 + 3_000)
-    expect(answer?.isError).toBe(true)
+    expect(answer).toEqual({ deny: expect.any(String) })
     await called
     await clock.advance(1_000)
     await call($)
@@ -474,7 +471,7 @@ test('a 401 on the events route leaves the tool unconfigured', CONFIGURED, async
   await clock.settle()
   await clock.advance(10_000)
   const answer = await call($)
-  expect(answer.isError).toBe(true)
+  expect(answer).toEqual({ deny: expect.any(String) })
   expect(router.gets).toHaveLength(1)
 })
 
@@ -484,7 +481,7 @@ test('a 403 on the events route leaves the tool reading', CONFIGURED, async ($, 
   router.answer(() => ({ status: 403 }))
   await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
   await clock.settle()
-  expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
+  expect(await call($)).toEqual({ result: SAMPLE_TEXT })
 })
 
 test('a 401 on a report sent under the settings a start replaced leaves the start in flight current', CONFIGURED,
@@ -509,7 +506,7 @@ test('a 401 on a report sent under the settings a start replaced leaves the star
     await held
     await clock.settle()
     expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'activity', 'session_start'])
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
+    expect(await call($)).toEqual({ result: SAMPLE_TEXT })
   })
 
 test('a valid key at a later start under the same session id sends nothing queued before a refused start', CONFIGURED,
@@ -570,7 +567,7 @@ test('a session start that fails leaves the tool unconfigured and the next promp
     const answer = await call($)
     await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
     await clock.settle()
-    expect(answer.isError).toBe(true)
+    expect(answer).toEqual({ deny: expect.any(String) })
     expect(router.gets).toHaveLength(1)
     expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
   })
@@ -599,11 +596,11 @@ test('a start that resolves no key leaves the tool answering an error, not the e
     const clock = mock.clock(on, { now: T0 })
     const router = fakeRouter(on, clock)
     await start($, clock)
-    expect(await call($)).toEqual({ content: [{ type: 'text', text: SAMPLE_TEXT }] })
+    expect(await call($)).toEqual({ result: SAMPLE_TEXT })
     variables.delete('ANTHROPIC_AUTH_TOKEN')
     await start($, clock)
     const answer = await call($)
-    expect(answer.isError).toBe(true)
+    expect(answer).toEqual({ deny: expect.any(String) })
     expect(router.gets).toHaveLength(1)
   })
 
