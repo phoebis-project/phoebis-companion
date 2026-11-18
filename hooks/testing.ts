@@ -248,6 +248,9 @@ function invalid(body: Record<string, unknown>): string | undefined {
     }
     if (parked && !['background', 'scheduled', 'both'].includes(String(body.park_kind))) return 'invalid_state'
     if (parked && body.park_kind !== 'background' && body.wake_at === undefined) return 'invalid_event'
+    // A background park holds no wake time and a scheduled park no deadline, and the router refuses the spare one.
+    if (parked && body.park_kind === 'background' && body.wake_at !== undefined) return 'invalid_event'
+    if (parked && body.park_kind === 'scheduled' && body.deadline !== undefined) return 'invalid_event'
   }
   return undefined
 }
