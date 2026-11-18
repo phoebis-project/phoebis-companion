@@ -16,29 +16,35 @@ const WAIT_MS = 3_000
 const TOOL_MINIMUM_VERSION: readonly [number, number, number] = [2, 1, 293]
 
 const DESCRIPTION = [
-  'Reads what this session\'s router key has left in its Phoebis Router pool: the pool\'s ceiling, pinning mode and ' +
-  'strategy, the active accounts under pseudonyms with their plan windows and spend, and this session\'s pins. Takes ' +
-  'no input and answers the router\'s JSON body as text, from a cache of ten seconds or a fresh read.',
-  'The body: `protocol` (1), `now` (the router\'s clock, RFC 3339), `pool` with `ceiling` (the share of a window the ' +
-  'pool fills an account to), `pinning` and `strategy`, then `accounts` and `pins`. Each account: `id` (an ' +
-  'eight-character pseudonym, the same across sessions on one router and naming no real account), `funding` (plan, ' +
-  'usage_based or api_key), `tier`, `obstacle` (why the router would not place on it right now, or null), ' +
-  '`pace_score`, `slow_down` (the slow-down in force on it, or null), `windows` keyed by window id (five_hour, ' +
-  'seven_day or a model\'s own week, and empty for an API-key account) and `spend`, one row per spend budget with ' +
-  '`period`, `spent_usd`, `budget_usd` and `period_end`.',
+  'Reads what this session\'s router key has left in its Phoebis Router pool: the pool\'s pinning mode and strategy, ' +
+  'the active accounts under pseudonyms with their plan windows and spend, and this session\'s pins. Takes no input ' +
+  'and answers the router\'s JSON body as text, from a cache of ten seconds or a fresh read.',
+  'The body: `protocol` (1), `now` (the router\'s clock, RFC 3339), `pool` with `pinning` and `strategy`, then ' +
+  '`accounts` and `pins`. Each account: `id` (an eight-character pseudonym, the same across sessions on one router ' +
+  'and naming no real account), `funding` (plan, usage_based or api_key), `tier`, `obstacle` (budget, ' +
+  'budget_unknown, cooldown, overage or spent for a hold on the whole account, else null), `slow_down` (the ' +
+  'slow-down in force on it, or null), `windows` keyed by window id (five_hour, seven_day or a model\'s own week, ' +
+  'and empty for an API-key account) and `spend`, one row per spend budget with `period`, `spent_usd`, ' +
+  '`budget_usd` and `period_end`.',
   'Each window: `utilization`, the share used now, from 0 to 1 of the window. `burn_per_hour`, the share the ' +
   'account\'s sessions burn in an hour, and `demand_per_hour`, what they would burn with no slow-down holding them. ' +
   '`horizon_at`, the window\'s reset or the subscription\'s end, whichever comes first. `projected_at_horizon`, the ' +
-  'predicted share at the earlier of horizon_at and five hours from now. `runway_minutes`, the whole minutes until ' +
-  'the share reaches the pool\'s ceiling at the current burn: 0 at or above the ceiling, and null means unbounded.',
+  'predicted share at the earlier of horizon_at and five hours from now. `ceiling`, the share of the window the ' +
+  'pool fills an account to: its 5-hour ceiling on five_hour and its weekly ceiling on the others. `fit`, the word ' +
+  'a fresh placement reads on the window: fits (a fresh session at the pool\'s usual burn stays under the ceiling ' +
+  'until the earlier of horizon_at and five hours from now), rewrite_only (a request still lands under the ceiling, ' +
+  'and the usual burn after it reaches the ceiling before then), least_bad (at or over the ceiling), ending ' +
+  '(allowance left, with the account inside its wind-down) or spent (the share at 1 or more, so nothing is left ' +
+  'until horizon_at). `runway_minutes`, the whole minutes until the share reaches `ceiling` at the current burn: 0 ' +
+  'at or above it, and null means unbounded.',
   'Each pin of this session: `agent` (main or a subagent id), `model`, `account` (a pseudonym), `placed_at`, ' +
   '`last_used_at`, `warm` and `warm_until` for its cache entry, `runway_minutes` on the window that binds it ' +
   '(`binding_window`) and `slow_down`.',
-  'Read it for pace alone. A long runway, or null on every window, means room for a long run or a fan-out. A short ' +
-  'runway on the account a pin names means the pool is close to its ceiling on that window at the current burn: ' +
-  'finish the work before then, wait for the reset horizon_at names, or spread the work out. The accounts are ' +
-  'pseudonymous, and the router keeps the final say on placement: this tool steers no placement, no pin and no ' +
-  'shedding round.',
+  'Read it for pace alone. A window whose fit is fits and whose runway is long or null has room for a long run or a ' +
+  'fan-out. A short runway on the account a pin names means the pool is close to its ceiling on that window at the ' +
+  'current burn: finish the work before then, wait for the reset horizon_at names, or spread the work out. The ' +
+  'accounts are pseudonymous, and the router keeps the final say on placement: this tool steers no placement, no ' +
+  'pin and no shedding round.',
   'A call pays before a long autonomous run, before a fan-out of subagents, and after a turn that felt slow. Calls ' +
   'inside ten seconds read one cached answer. While the router cannot be reached, the answer is an error text ' +
   'naming the failure.',

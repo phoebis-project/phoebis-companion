@@ -170,13 +170,12 @@ export const LEASE_MS = 90000
 export const SAMPLE_ALLOWANCE = {
   protocol: 1,
   now: '2026-11-08T12:00:00Z',
-  pool: { ceiling: 0.95, pinning: 'always', strategy: 'priority' },
+  pool: { pinning: 'always', strategy: 'priority' },
   accounts: [{
     id: 'bbbbbbbb',
     funding: 'plan',
     tier: 'default_claude_max_20x',
     obstacle: null,
-    pace_score: 0.5,
     slow_down: null,
     windows: {
       five_hour: {
@@ -185,6 +184,8 @@ export const SAMPLE_ALLOWANCE = {
         burn_per_hour: 0.1,
         demand_per_hour: 0.1,
         projected_at_horizon: 0.45,
+        ceiling: 0.95,
+        fit: 'fits',
         runway_minutes: 420,
       },
     },
