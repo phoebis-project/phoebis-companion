@@ -1,4 +1,4 @@
-import type { Identity, SavedAgent, SavedCron, SavedTask } from '../types/index.d.ts'
+import type { Identity, SavedAgent, SavedCron, SavedTask } from '../types'
 
 // The rules the lifecycle computes with. Nothing here holds state: the session, the queue and the tracked work
 // belong to keepalive.ts.

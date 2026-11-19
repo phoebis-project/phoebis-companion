@@ -11,8 +11,8 @@ import type {
   SessionVersion,
 } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
-import type { Identity } from '../types/index.d.ts'
-import type { Body } from './rules.ts'
+import type { Identity } from '../types'
+import type { Body } from './rules'
 
 // The recorded host beneath every mod test: the router behind `$.http.fetch` (the posted reports and the allowance
 // GETs), the session's id and version, the environment writes, the state the host holds for the plugin, the plugin's

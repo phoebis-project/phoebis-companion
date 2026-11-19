@@ -1,8 +1,8 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { fakeRouter, SAMPLE_ALLOWANCE } from './testing.ts'
-import type { FakeRouter } from './testing.ts'
+import { fakeRouter, SAMPLE_ALLOWANCE } from './testing'
+import type { FakeRouter } from './testing'
 
 const ROUTER = 'http://127.0.0.1:1'
 const KEY = 'k-test'

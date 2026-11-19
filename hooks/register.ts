@@ -1,8 +1,8 @@
 import type { Register } from 'claude-code'
-import { answerCall, errorAnswer, retireStarts, startCheck, TOOL_CALL } from './allowance.ts'
-import { clearSettings, emptyQueue, installKeepalive, MINIMUM_VERSION, startKeepalive } from './keepalive.ts'
-import { belowFloor, errorText, optionsOf, redactSecrets, resolveSettings, say, urlProblem } from './settings.ts'
-import type { Resolution, Settings } from './settings.ts'
+import { answerCall, errorAnswer, retireStarts, startCheck, TOOL_CALL } from './allowance'
+import { clearSettings, emptyQueue, installKeepalive, MINIMUM_VERSION, startKeepalive } from './keepalive'
+import { belowFloor, errorText, optionsOf, redactSecrets, resolveSettings, say, urlProblem } from './settings'
+import type { Resolution, Settings } from './settings'
 
 const MISSING: Record<Extract<Resolution, { missing: unknown }>['missing'], string> = {
   invalid_url: 'the management URL from the option or ANTHROPIC_BASE_URL is not usable',

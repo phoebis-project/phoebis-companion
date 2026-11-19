@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
-import { bearer, belowFloor, errorText, parsed, redactSecrets, say } from './settings.ts'
-import type { Settings } from './settings.ts'
+import { bearer, belowFloor, errorText, parsed, redactSecrets, say } from './settings'
+import type { Settings } from './settings'
 
 // The start check and the allowance tool: one GET of the allowance route at session start settles whether a router
 // answers at the URL, whether the key is valid and whether the key may read the allowance, and the tool answers the

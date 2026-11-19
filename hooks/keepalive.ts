@@ -1,5 +1,5 @@
 import type { AgentInfo, EngineInterface, HttpResponse, On, Timer } from 'claude-code'
-import type { Identity, SavedAgent, SavedModel, SavedTask } from '../types/index.d.ts'
+import type { Identity, SavedAgent, SavedModel, SavedTask } from '../types'
 import {
   agentOf,
   collapse,
@@ -19,10 +19,10 @@ import {
   reusable,
   sameAgent,
   samePark,
-} from './rules.ts'
-import type { AgentRecord, Body, Cron, Park, Report } from './rules.ts'
-import { bearer, errorText, parsed, redactSecrets, say } from './settings.ts'
-import type { Settings } from './settings.ts'
+} from './rules'
+import type { AgentRecord, Body, Cron, Park, Report } from './rules'
+import { bearer, errorText, parsed, redactSecrets, say } from './settings'
+import type { Settings } from './settings'
 
 // The oldest client whose hook events this module was checked against.
 export const MINIMUM_VERSION: readonly [number, number, number] = [2, 1, 287]
