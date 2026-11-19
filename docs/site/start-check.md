@@ -5,6 +5,10 @@ At session start, once the settings resolve to a URL and a key, the mod sends on
 apart from the keepalive registration, and waits up to three seconds for the answer. The answer settles three things at
 once: whether a router answers at the URL, whether the key is valid, and whether the key may read the allowance.
 
+The rows that register the tool hold on Claude Code 2.1.293 or later. Between 2.1.287, the oldest client the mod runs
+on, and that version, the mod makes the same check and writes one line to Claude Code's debug log in place of
+registering the tool ([Install](install.md#install)).
+
 | Answer | What the mod does |
 | --- | --- |
 | `200` with the allowance body | Registers the tool and keeps the body as the first entry of the tool's cache. No line. |
