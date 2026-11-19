@@ -5,15 +5,15 @@ At session start, once the settings resolve to a URL and a key, the mod sends on
 apart from the keepalive registration, and waits up to three seconds for the answer. The answer settles three things at
 once: whether a router answers at the URL, whether the key is valid, and whether the key may read the allowance.
 
-The lifecycle reports of the `403` row go out while the setting Cache warming reports is on
-([Configure](install.md#configure)).
-
 | Answer | What the mod does |
 | --- | --- |
 | `200` with the allowance body | Registers the tool and keeps the body as the first entry of the tool's cache. No line. |
 | `403` with the code `companion_not_permitted` | Registers no tool, since the operator withheld the permission, and writes `phoebis-companion: this key may not read the allowance` to Claude Code's debug log alone. The lifecycle reports still go out. |
 | `401` | Writes `phoebis-companion: the router at <url> refused the key (401), so this session reports nothing` to the transcript, registers no tool, and empties the keepalive queue, as a `401` on the keepalive route does. |
 | anything else | Writes `phoebis-companion: no answer from the router at <url> (<status, failure or "not the allowance">), the allowance tool answers once it is back` to the transcript and registers the tool anyway. |
+
+The lifecycle reports of the `403` row go out while the setting Cache warming reports is on
+([Configure](install.md#configure)).
 
 The last row covers a transport failure, a `5xx`, another `4xx`, the three-second limit, and a `200` whose body is not
 the allowance, such as the console page the admin listener serves for an unknown path when the Management URL names the
