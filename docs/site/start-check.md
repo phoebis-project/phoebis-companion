@@ -7,7 +7,8 @@ once: whether a router answers at the URL, whether the key is valid, and whether
 
 The rows that register the tool hold on Claude Code 2.1.293 or later. Between 2.1.287, the oldest client the mod runs
 on, and that version, the mod makes the same check and writes one line to Claude Code's debug log in place of
-registering the tool ([Install](install.md#install)).
+registering the tool ([Install](install.md#install)). The lifecycle reports of the `403` row go out while the setting
+Cache warming reports is on ([Configure](install.md#configure)).
 
 | Answer | What the mod does |
 | --- | --- |
