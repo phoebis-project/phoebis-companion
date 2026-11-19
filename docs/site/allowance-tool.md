@@ -9,8 +9,7 @@ model what the answer holds and when a call pays: before a long autonomous run, 
 a turn that felt slow. It proposes no model or effort change and names no account by anything but its pseudonym.
 
 The answer is the key's pool as the router reads it at that instant. The protocol page lists every field with its type
-([The companion routes](../router/relay.md#the-companion-routes)). This section says what the model learns from each
-part.
+([The companion routes](../router/relay.md#the-companion-routes)). This page says what the model learns from each part.
 
 `pool` carries the pool's `pinning` mode and its `strategy`. `accounts` holds one entry per active account of the pool
 under its pseudonym `id`, with its `funding` (`plan`, `usage_based` or `api_key`), its rate-limit `tier`, the
