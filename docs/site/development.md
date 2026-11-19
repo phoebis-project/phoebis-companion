@@ -7,6 +7,7 @@
 From a checkout of the companion repository:
 
 ```sh
+claude plugin validate .
 claude plugin validate --strict .
 claude plugin test .
 ```
