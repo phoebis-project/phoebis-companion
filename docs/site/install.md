@@ -13,11 +13,9 @@ The install line resolves once the marketplace is added. From a shell, `claude p
 `claude plugin install` take the same arguments. For development, `claude --plugin-dir <checkout>` loads a checkout of
 [the companion repository](https://github.com/phoebis-project/phoebis-companion) for one session.
 
-The mod needs Claude Code 2.1.287 or later. On an older client it writes one transcript line, `phoebis-companion: Claude
-Code <version> is older than 2.1.287, so the mod does nothing`, raises a toast with the same text when Start check
-toasts is on, and does nothing more. The `allowance` tool needs 2.1.293 or later: on a client between the two versions
-the mod reports and runs its start check, and writes one line to Claude Code's debug log in place of registering the
-tool.
+The mod needs Claude Code 2.1.299 or later. An older client runs the session without the mod: its engine refuses the
+hooks module, with the refusal in Claude Code's debug log and, for a headless run, on its error output (checked on
+Claude Code 2.1.287 and 2.1.296).
 
 ## Configure
 

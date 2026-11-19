@@ -20,9 +20,8 @@ the Desktop app, the terminal and the VS Code extension's chat panel. It behaves
 key it reports, checks and answers the tool unless Claude Code refuses its fetch (see
 [Configure](install.md#configure)), and without them it writes its one transcript line and does nothing else. A `claude
 -p` run registers, reports its turns, its background commands and its subagents, and ends its session when it exits. The
-mod draws nothing beyond the toasts of the start check. Its messages are the version line of
-[Install](install.md#install), the transcript lines of [Configure](install.md#configure) and [The start
-check](start-check.md), the conflict line and the takeover line of [The owner header](reports.md#the-owner-header), and
-the lines in Claude Code's debug log: a dropped report, a refused key, a report whose fetch threw, a start hook that
-threw, the allowance permission the operator withheld, the client process's identity read at load, and the tool left
-unregistered on a client older than 2.1.293.
+mod draws nothing beyond the toasts of the start check. Its messages are the transcript lines of
+[Configure](install.md#configure) and [The start check](start-check.md), the conflict line and the takeover line of [The
+owner header](reports.md#the-owner-header), and the lines in Claude Code's debug log: a dropped report, a refused key, a
+report whose fetch threw, a start hook that threw, the allowance permission the operator withheld, and the client
+process's identity read at load.

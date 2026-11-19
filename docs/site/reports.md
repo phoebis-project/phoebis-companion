@@ -123,9 +123,8 @@ while the two variables still name it, so the owner line and the instance stay, 
 owner. A child process inherits the two variables but runs as another process, for which the store holds no pair, so it
 mints its own pair and registers as its own instance. Where Claude Code cannot run the command that reads the process's
 identity, a reload after a `/clear` mints a new pair. A child process that never runs the fence keeps the parent's owner
-line: one on a client older than the floor, where the mod writes only the line [Install](install.md#install) names, one
-with the mod disabled, or one without a URL or a key. That line matters only for a child that sends the parent's session
-id.
+line: one on a client that does not load the mod ([Install](install.md#install)), one with the mod disabled, or one
+without a URL or a key. That line matters only for a child that sends the parent's session id.
 
 A `session_start` the router refuses with a bare `instance_conflict`, since another instance holds the session under a
 live lease, leaves the session live. The mod writes one line to the transcript, `phoebis-companion: another instance
