@@ -26,3 +26,5 @@ check](start-check.md), the conflict line and the takeover line of [The owner he
 the lines in Claude Code's debug log: a dropped report, a refused key, a report whose fetch threw, a start hook that
 threw, the allowance permission the operator withheld, the client process's identity read at load, and the tool left
 unregistered on a client older than 2.1.293.
+
+<!-- This line exists to run the documentation build on a pull request. -->
