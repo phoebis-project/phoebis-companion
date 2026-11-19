@@ -1,8 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { MINIMUM_VERSION } from './keepalive'
-import { belowFloor, resolveSettings, urlProblem } from './settings'
+import { resolveSettings, urlProblem } from './settings'
 import { fakeRouter } from './testing'
 import type { FakeRouter } from './testing'
 
@@ -71,19 +70,6 @@ test('an empty or blank source counts as unset', () => {
   ).toStrictEqual({ settings: { url: ROUTER, key: 'oauth-key' } })
   expect(resolveSettings({ ...UNSET, managementUrl: ' ', baseUrl: ' \t', token: ' ', authToken: 'auth-key' }))
     .toStrictEqual({ missing: 'no_url' })
-})
-
-test('the minimum version admits 2.1.287, 2.1.290-dev and 3.0.0 and refuses 2.1.286', () => {
-  expect(belowFloor('2.1.287', MINIMUM_VERSION)).toBeUndefined()
-  expect(belowFloor('2.1.290-dev', MINIMUM_VERSION)).toBeUndefined()
-  expect(belowFloor('3.0.0', MINIMUM_VERSION)).toBeUndefined()
-  expect(belowFloor('2.1.286', MINIMUM_VERSION)).toEqual(expect.any(String))
-})
-
-test('the minimum version admits 2.2.0 and refuses 1.9.999 and a string that names no version', () => {
-  expect(belowFloor('2.2.0', MINIMUM_VERSION)).toBeUndefined()
-  expect(belowFloor('1.9.999', MINIMUM_VERSION)).toEqual(expect.any(String))
-  expect(belowFloor('not a version', MINIMUM_VERSION)).toEqual(expect.any(String))
 })
 
 test('config.set denies a URL with a credential or a query and takes a path prefix', async () => {

@@ -560,9 +560,17 @@ test('a valid key at a later start under the same session id sends nothing queue
 
 test('a session start that fails leaves the tool unconfigured and the next prompt sends nothing', CONFIGURED,
   async ($, on) => {
-    const { clock, router } = host(on)
+    // The second start fails at its first read, before it holds settings of its own.
+    const denials: string[] = []
+    on('env.get', (_$, e) => {
+      const denial = denials.shift()
+      if (denial !== undefined) return { deny: denial }
+      return { value: e.name === 'ANTHROPIC_AUTH_TOKEN' ? KEY : undefined }
+    })
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
     await start($, clock)
-    router.denyVersion('the version could not be read')
+    denials.push('the environment could not be read')
     await start($, clock)
     const answer = await call($)
     await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
@@ -602,16 +610,4 @@ test('a start that resolves no key leaves the tool answering an error, not the e
     const answer = await call($)
     expect(answer).toEqual({ deny: expect.any(String) })
     expect(router.gets).toHaveLength(1)
-  })
-
-test('a client between 2.1.287 and 2.1.293 runs the start check and reports, with one debug line in place of the tool',
-  CONFIGURED, async ($, on) => {
-    mock.env(on, { ANTHROPIC_AUTH_TOKEN: KEY })
-    const clock = mock.clock(on, { now: T0 })
-    const router = fakeRouter(on, clock, { version: '2.1.292' })
-    await start($, clock)
-    expect(router.gets).toHaveLength(1)
-    expect(router.tools).toEqual([])
-    expect(router.logs.map((line) => line.to)).toEqual(['debug'])
-    expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
   })

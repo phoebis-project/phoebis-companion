@@ -8,17 +8,16 @@ import type {
   PromptEditResult,
   PromptSubmitResult,
   RegisteredToolSpec,
-  SessionVersion,
 } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { Identity } from '../types'
 import type { Body } from './rules'
 
 // The recorded host beneath every mod test: the router behind `$.http.fetch` (the posted reports and the allowance
-// GETs), the session's id and version, the environment writes, the state the host holds for the plugin, the plugin's
-// own store, the command that reads the client process, the log, the toasts, the tools the mod registers, the agent
-// list, and the engine's own answers to the events a replay or a settings change raises, so no bottom hook throws for
-// an event the mod passes on.
+// GETs), the session's id, the environment writes, the state the host holds for the plugin, the plugin's own store,
+// the command that reads the client process, the log, the toasts, the tools the mod registers, the agent list, and the
+// engine's own answers to the events a replay or a settings change raises, so no bottom hook throws for an event the
+// mod passes on.
 
 type Ack = {
   session_id: string
@@ -47,8 +46,6 @@ export type GetAnswer = (url: string, headers: Record<string, string>) => Reply 
 export type FakeOptions = {
   /** What `$.session.id()` answers until `setId` changes it. */
   id?: string
-  /** What `$.session.version()` answers until a replayed `session.start` line names its own. */
-  version?: string
   /** The identity the host already holds for the plugin, as it does across a hot reload of the module. */
   state?: Identity
   /** The other values the host already holds for the plugin, by key, as it does across a hot reload of the module. */
@@ -113,7 +110,6 @@ export type FakeRouter = {
   setConfig: ($: Engine, change: ConfigChange) => Promise<ConfigSetResult>
   setId: (id: string) => void
   setAgents: (list: readonly { id: string; status: string; type?: string; parentId?: string }[]) => void
-  setVersion: (version: SessionVersion) => void
   /** Replaces the default answer for the next request, and several calls answer the next requests in turn. */
   answer: (fn: Answer) => void
   /** Replaces the default answer, a `200` with `SAMPLE_ALLOWANCE`, for the next GET, and several calls queue up. */
@@ -156,8 +152,6 @@ export type FakeRouter = {
   denyEnvSet: (reason: string) => void
   /** Denies the next `$.tool.register` with the reason, as an engine that refuses the spec does. */
   denyRegister: (reason: string) => void
-  /** Denies the next `$.session.version()` with the reason, as a host that cannot read the client's version does. */
-  denyVersion: (reason: string) => void
 }
 
 type Replayed = { tool?: unknown; spawn?: { model?: string; agentId?: string } }
@@ -260,10 +254,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   on('classic.Stop', async () => ({}))
   on('classic.SubagentStop', async () => ({}))
   let id = options.id ?? 'session-a'
-  // The oldest client that gets the allowance tool, so a test names a version only where the version is the point.
-  let version: SessionVersion = { version: options.version ?? '2.1.293', base: options.version ?? '2.1.293' }
-  // The fields of an agent that a hook reads. The client's AgentInfo gains required fields between releases, so the
-  // list is cast once, where the fake answers agent.list.
+  // The fields the fake builds for an agent, which cover what a hook reads. The client's AgentInfo gains required
+  // fields between releases, so the list is cast once, where the fake answers agent.list.
   let agents: Pick<AgentInfo, 'description' | 'id' | 'parentId' | 'status' | 'type'>[] = []
   const answers: Answer[] = []
   const getAnswers: GetAnswer[] = []
@@ -273,7 +265,6 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const submits: (() => PromptSubmitResult | Promise<PromptSubmitResult>)[] = []
   const envSetDenials: string[] = []
   const registerDenials: string[] = []
-  const versionDenials: string[] = []
   let envSetDelayMs = 0
   let idDelayMs = 0
   let listDelayMs = 0
@@ -322,9 +313,6 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
         ...(agent.parentId === undefined ? {} : { parentId: agent.parentId }),
       }))
     },
-    setVersion: (next) => {
-      version = next
-    },
     answer: (fn) => {
       answers.push(fn)
     },
@@ -363,9 +351,6 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     denyRegister: (reason) => {
       registerDenials.push(reason)
-    },
-    denyVersion: (reason) => {
-      versionDenials.push(reason)
     },
   }
   const slots: Replayed = {}
@@ -459,12 +444,6 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
       await clock.sleep(ms)
     }
     return { value: id }
-  })
-  on('session.version', () => {
-    router.reached.push('session.version')
-    const denial = versionDenials.shift()
-    if (denial !== undefined) return { deny: denial }
-    return { value: version }
   })
   on('env.set', async (_$, e) => {
     router.reached.push('env.set')
@@ -625,7 +604,6 @@ export async function replay($: Engine, _on: On, log: string, clock: MockClock, 
     if (DROPPED.has(line.kind)) continue
     switch (line.kind) {
       case 'session.start':
-        if (typeof line.version === 'object' && line.version !== null) router.setVersion(line.version as SessionVersion)
         await $.session.start({
           cwd: text(line.cwd),
           surface: line.surface === 'terminal' ? 'terminal' : null,

@@ -1,5 +1,5 @@
 import type { EngineInterface } from 'claude-code'
-import { bearer, belowFloor, errorText, parsed, redactSecrets, say } from './settings'
+import { bearer, errorText, parsed, redactSecrets, say } from './settings'
 import type { Settings } from './settings'
 
 // The start check and the allowance tool: one GET of the allowance route at session start settles whether a router
@@ -13,7 +13,6 @@ const CACHE_MS = 10_000
 // The start check and a call both wait this long for the router, inside the 10 s a hook has per dispatch: a router
 // that accepts the connection and never answers would otherwise hold the session start or the model's call with it.
 const WAIT_MS = 3_000
-const TOOL_MINIMUM_VERSION: readonly [number, number, number] = [2, 1, 293]
 
 const DESCRIPTION = [
   'Reads what this session\'s router key has left in its Phoebis Router pool: the pool\'s pinning mode and strategy, ' +
@@ -138,12 +137,7 @@ export async function answerCall($: EngineInterface, settings: Settings, session
   return answer(body)
 }
 
-async function registerTool($: EngineInterface, client: string): Promise<void> {
-  const older = belowFloor(client, TOOL_MINIMUM_VERSION)
-  if (older !== undefined) {
-    say($, `${older}, so the allowance tool is not registered`, { to: 'debug' })
-    return
-  }
+async function registerTool($: EngineInterface): Promise<void> {
   try {
     await $.tool.register({
       name: TOOL_NAME,
@@ -167,7 +161,7 @@ export function retireStarts(): void {
  * tool's registration on every outcome but a refused key and a withheld permission. A check whose GET a later start
  * overtook answers `stale` and does nothing after the GET.
  */
-export async function startCheck($: EngineInterface, settings: Settings, sessionId: string, client: string,
+export async function startCheck($: EngineInterface, settings: Settings, sessionId: string,
   tell: (line: string) => void): Promise<StartOutcome> {
   // A reload under a changed URL or key must never answer the earlier configuration's body.
   retireStarts()
@@ -189,6 +183,6 @@ export async function startCheck($: EngineInterface, settings: Settings, session
   }
   // The tool list sits at the front of the prompt's cached prefix, so the tool is registered while the router is
   // unreachable rather than appearing later and rewriting the whole prefix once.
-  if (outcome === 'register' || outcome === 'unreachable') await registerTool($, client)
+  if (outcome === 'register' || outcome === 'unreachable') await registerTool($)
   return outcome
 }

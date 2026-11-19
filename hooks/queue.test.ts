@@ -684,7 +684,7 @@ describe('the mod sends nothing without a url or without a key', () => {
     test(name, { options }, async ($, on) => {
       mock.env(on, variables)
       const clock = mock.clock(on, { now: T0 })
-      const router = fakeRouter(on, clock, { version: '2.1.292' })
+      const router = fakeRouter(on, clock)
       await start($, clock)
       await prompt($, clock)
       await clock.advance(60000)
@@ -693,20 +693,6 @@ describe('the mod sends nothing without a url or without a key', () => {
       expect(router.logs).toEqual([{ text: line, to: 'transcript' }])
     })
   }
-})
-
-test('a client older than 2.1.287 gets the floor line and its toast and sends nothing', CONFIGURED, async ($, on) => {
-  mock.env(on, { ANTHROPIC_AUTH_TOKEN: KEY })
-  const clock = mock.clock(on, { now: T0 })
-  const router = fakeRouter(on, clock, { version: '2.1.286' })
-  await start($, clock)
-  await prompt($, clock)
-  await clock.advance(60000)
-  await end($, clock, 'other', 'session-a')
-  const line = 'phoebis-companion: Claude Code 2.1.286 is older than 2.1.287, so the mod does nothing'
-  expect(router.reached.filter((op) => ['http.fetch', 'env.set'].includes(op))).toEqual([])
-  expect(router.logs).toEqual([{ text: line, to: 'transcript' }])
-  expect(router.toasts).toEqual([line])
 })
 
 test('a token from the option without management_url sends nothing to ANTHROPIC_BASE_URL and says so in one ' +
@@ -763,8 +749,7 @@ test('the key appears in the Authorization header and nowhere else', CONFIGURED,
   router.answer(() => ({ status: 401 }))
   await prompt($, clock)
   expect(router.requests.length).toBeGreaterThan(3)
-  // The recorded client is 2.1.287, so the start writes the debug line that stands in for the allowance tool.
-  expect(router.logs.map((line) => line.to)).toEqual(['debug', 'transcript', 'debug'])
+  expect(router.logs.map((line) => line.to)).toEqual(['transcript', 'debug'])
   for (const headers of router.headers) {
     expect(headers.Authorization).toBe(`Bearer ${KEY}`)
     const others = Object.entries(headers).filter(([name]) => name !== 'Authorization')

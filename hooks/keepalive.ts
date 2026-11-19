@@ -24,9 +24,6 @@ import type { AgentRecord, Body, Cron, Park, Report } from './rules'
 import { bearer, errorText, parsed, redactSecrets, say } from './settings'
 import type { Settings } from './settings'
 
-// The oldest client whose hook events this module was checked against.
-export const MINIMUM_VERSION: readonly [number, number, number] = [2, 1, 287]
-
 const MAIN = 'main'
 // The router's codes are snake_case words, so anything else an answer carries stays out of the log.
 const CODE = /^[a-z_]{1,64}$/
@@ -1189,9 +1186,8 @@ export function installKeepalive(on: On, refused: RefusalHandler): void {
     const agentId = field(r, 'agentId')
     if (live() && session === record && typeof agentId === 'string') {
       const parent = holder(e.parentAgentId) ?? MAIN
-      // A workflow's agent is a loop the client's list never names, so it works for its parent. The marker is read
-      // loosely, since the oldest supported client's declarations lack it.
-      if (field(e, 'workflow') !== undefined) model.unlisted.set(agentId, parent)
+      // A workflow's agent is a loop the client's list never names, so it works for its parent.
+      if (e.workflow !== undefined) model.unlisted.set(agentId, parent)
       else spawned(agentId, parent)
       void pump($)
     }

@@ -364,8 +364,7 @@ test('the owner id reaches no log line and no header of the mod\'s own requests'
   router.answer(() => ({ status: 401 }))
   await prompt($, clock)
   const { owner } = minted(router)
-  // The recorded client is 2.1.287, so the start writes the debug line that stands in for the allowance tool.
-  expect(router.logs.map((line) => line.to)).toEqual(['debug', 'transcript', 'debug'])
+  expect(router.logs.map((line) => line.to)).toEqual(['transcript', 'debug'])
   expect(JSON.stringify(router.logs)).not.toContain(owner)
   expect(JSON.stringify(router.headers)).not.toContain(owner)
   expect(JSON.stringify(router.targets)).not.toContain(owner)

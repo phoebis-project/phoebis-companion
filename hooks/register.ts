@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 import { answerCall, errorAnswer, retireStarts, startCheck, TOOL_CALL } from './allowance'
-import { clearSettings, emptyQueue, installKeepalive, MINIMUM_VERSION, startKeepalive } from './keepalive'
-import { belowFloor, errorText, optionsOf, redactSecrets, resolveSettings, say, urlProblem } from './settings'
+import { clearSettings, emptyQueue, installKeepalive, startKeepalive } from './keepalive'
+import { errorText, optionsOf, redactSecrets, resolveSettings, say, urlProblem } from './settings'
 import type { Resolution, Settings } from './settings'
 
 const MISSING: Record<Extract<Resolution, { missing: unknown }>['missing'], string> = {
@@ -78,13 +78,6 @@ export const register: Register = (on, options) => {
     }
     // Each `return next(e)` below hands back its promise unawaited, so a rejection beneath never reaches this catch.
     try {
-      const { version, base } = await $.session.version()
-      const client = base ?? version
-      const older = belowFloor(client, MINIMUM_VERSION)
-      if (older !== undefined) {
-        tell(`${older}, so the mod does nothing`)
-        return next(e)
-      }
       const [baseUrl, authToken, apiKey, oauthToken] = await Promise.all([
         $.env.get('ANTHROPIC_BASE_URL'),
         $.env.get('ANTHROPIC_AUTH_TOKEN'),
@@ -114,7 +107,7 @@ export const register: Register = (on, options) => {
       // No await falls between setting current and startCheck's generation step, so the start that set current last
       // is the one whose check is not stale.
       current = resolution.settings
-      const outcome = await startCheck($, resolution.settings, sessionId, client, tell)
+      const outcome = await startCheck($, resolution.settings, sessionId, tell)
       // A later start that set or cleared current during the check owns the configuration, so this one leaves it.
       if (outcome === 'stale' || current !== resolution.settings) return next(e)
       if (outcome === 'refused') {

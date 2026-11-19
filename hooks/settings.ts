@@ -57,21 +57,6 @@ export function optionsOf(options: PluginOptions): Options {
   }
 }
 
-function versionAtLeast(version: string, minimum: readonly [number, number, number]): boolean {
-  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version)
-  if (match === null) return false
-  const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])]
-  const [leastMajor, leastMinor, leastPatch] = minimum
-  if (major !== leastMajor) return major > leastMajor
-  if (minor !== leastMinor) return minor > leastMinor
-  return patch >= leastPatch
-}
-
-/** The opening of the line for a client older than `minimum`, `undefined` for one at or past it. */
-export function belowFloor(client: string, minimum: readonly [number, number, number]): string | undefined {
-  return versionAtLeast(client, minimum) ? undefined : `Claude Code ${client} is older than ${minimum.join('.')}`
-}
-
 /** Writes one of the mod's lines under its prefix and answers the line, so a toast can show the same text. */
 export function say($: EngineInterface, text: string, options?: Parameters<EngineInterface['ui']['log']>[1]): string {
   const line = PREFIX + text
