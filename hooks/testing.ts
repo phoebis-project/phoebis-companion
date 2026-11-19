@@ -262,7 +262,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   let id = options.id ?? 'session-a'
   // The oldest client that gets the allowance tool, so a test names a version only where the version is the point.
   let version: SessionVersion = { version: options.version ?? '2.1.293', base: options.version ?? '2.1.293' }
-  let agents: AgentInfo[] = []
+  // The fields of an agent that a hook reads. The client's AgentInfo gains required fields between releases, so the
+  // list is cast once, where the fake answers agent.list.
+  let agents: Pick<AgentInfo, 'description' | 'id' | 'parentId' | 'status' | 'type'>[] = []
   const answers: Answer[] = []
   const getAnswers: GetAnswer[] = []
   const tools: ((e: { tool: string }) => unknown)[] = []
@@ -417,7 +419,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     router.headers.push({ ...(init.headers ?? {}) })
     let decoded: Record<string, unknown>
     try {
-      decoded = JSON.parse(init.body ?? '') as Record<string, unknown>
+      decoded = JSON.parse(typeof init.body === 'string' ? init.body : '') as Record<string, unknown>
     } catch {
       decoded = { unparsed: init.body ?? '' }
     }
@@ -554,7 +556,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
       listDelayMs = 0
       await clock.sleep(ms)
     }
-    return { value: agents }
+    return { value: agents as AgentInfo[] }
   })
 
   // The engine's own answers: what each event's bottom resolves to when nothing beneath the plugins rewrites it.
