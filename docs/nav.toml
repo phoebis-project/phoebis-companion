@@ -1,0 +1,8 @@
+nav = [
+  { "Overview" = "index.md" },
+  { "Install and settings" = "install.md" },
+  { "The start check" = "start-check.md" },
+  { "The allowance tool" = "allowance-tool.md" },
+  { "What the mod reports" = "reports.md" },
+  { "Development" = "development.md" },
+]

@@ -1,0 +1,147 @@
+# What the mod reports
+
+The mod reports on main, the session's own agent, and on each subagent the client lists. Each agent has an open set: the
+background commands and the subagents it started that have not ended yet. The session's crons and wakeups belong to
+main. Every report is one request to the router's keepalive route, and the route, the six events with their fields, the
+acknowledgment, the refusal codes and how the mod queues, sends and retries are on [The
+relay](../router/relay.md#the-keepalive-protocol).
+
+| Mod event | Fact | Report |
+| --- | --- | --- |
+| `session.start` | the process is up | the owner fence, then `session_start` |
+| `prompt.submit` from `bridge`, `composer`, `sdk` or `slack-ping` | a real prompt | `activity` kind `prompt` for main |
+| `prompt.submit` from `scheduled-trigger` | a cron or a wakeup fired | it leaves the crons or moves to its next fire |
+| `prompt.edit` | the person is typing | `activity` kind `presence` for main, at most once a minute |
+| `turn.step` | a model request of main or a subagent | `state busy` when the agent was not busy |
+| `tool.call` before the tool runs | a tool runs | `state busy` when the agent was not busy |
+| `tool.call` after Bash | a command started in the background | it joins the agent's open set with its deadline |
+| `tool.call` after CronCreate or ScheduleWakeup | a wakeup is scheduled | it joins the crons with its next fire |
+| `tool.call` after CronDelete | a cron is gone | it leaves the crons |
+| `agent.spawn` | a subagent started | `agent_start`, and it joins its parent's open set |
+| `classic.Stop` | main's turn ended, with the client's background list | a command the background list no longer runs leaves its owner's open set |
+| `classic.SubagentStop` | a subagent's turn ended, with the background list | the same |
+| `turn.complete` of a subagent | the subagent's turn ended | `state parked` on its open set, or `state released` |
+| `turn.complete` of main | main's turn ended | `state idle`, or `state parked` with its park |
+| `session.end` | the session ends or changes id | `session_end`, one request |
+| the heartbeat timer | time passed | the session id check, the reconcile, then `heartbeat` |
+
+A prompt is the person's own when its origin is `bridge` (sent through Remote Control), `composer` (typed at the
+prompt), `sdk` (handed over by an SDK host) or `slack-ping` (sent from Slack). The router marks main busy on that prompt
+itself, and a prompt of any other origin reports no activity.
+
+A stop event, `classic.Stop` at the end of main's turn and `classic.SubagentStop` at the end of a subagent's, carries
+the client's background list: every background command and subagent, with its id, type and status. A command in an open
+set that the background list reads as ended, whatever ended it, or no longer holds, leaves its owner's open set there.
+The mod reads no notification's text: a subagent's end is the agent list's to tell, and a notification that names a
+subagent changes nothing, so a subagent that stopped with a background command of its own stays parked on that command
+until a stop event's background list no longer runs it.
+
+A Bash call counts as a background command when its result carries `backgroundTaskId`. A tool call that another plugin
+raises marks no agent busy, although a background command or a cron it starts still counts for the session. A loop the
+client's agent list never names, such as a workflow's agent or one of Claude Code's own forks, counts for the agent that
+started it, or for main, and is never reported as an agent.
+
+The mod reads `$.session.id()` at session start, at every prompt and at every heartbeat. After a `/clear` or a
+`/resume`, `session.end` ends the registered session at once and no `session.start` follows, so the next prompt that
+reads the new id registers it under the same instance. Nothing the old session had open or scheduled carries over. At
+each heartbeat the mod also releases the subagents the client's agent list reads `completed`, `failed` or `killed` or no
+longer lists, and closes the background commands past their deadline. The agent list describes the agents the mod held
+when it asked for it, so a subagent spawned while the answer was out is judged at the next heartbeat, and an answer that
+arrives after a `/clear` or a `/resume` replaced the session is dropped. A tool result or a spawn answer that lands
+after such a replacement is dropped the same way: the work belongs to the session that started it.
+
+The mod writes its tracked work, each agent's open set, the session's crons, the subagents it released and those the
+router last named released, to the plugin's host state whenever it changes. A hot reload of the module in the same
+session reads it back before the registration's answer is reconciled, so a park the router holds is kept rather than
+replaced with a fresh busy main, the commands and crons the earlier load tracked still close and fire, and a released
+subagent stays released. A new session id starts from nothing.
+
+## Parks
+
+When main's turn ends, main reports `idle`, or `parked` with a `park_kind`:
+
+- `background` while its open set holds anything
+- `scheduled` while a cron or a wakeup is pending
+- `both` while both hold
+
+`wake_at` is the earliest time the client fires one of the session's crons or wakeups, in epoch milliseconds. The mod
+computes it as the client's scheduler does, from the cron expression, the time of creation or of the last fire, and the
+cron's id. A wakeup's `wake_at` is the `scheduledFor` time its ScheduleWakeup call answered. `deadline` is the latest
+deadline among the open background commands, in epoch milliseconds, and the report carries it only while every open
+entry is a command, because a subagent has no deadline.
+
+A background command's deadline is its start plus the call's `timeout`, or plus 30 minutes when the call names none, and
+at most 2 hours after its start. These are the limits at which the client stops a background command, and the two
+variables only raise them: `BASH_DEFAULT_TIMEOUT_MS` above 30 minutes becomes the default, and the larger of
+`BASH_MAX_TIMEOUT_MS` and `BASH_DEFAULT_TIMEOUT_MS`, when it is above 2 hours, becomes the cap. The mod reads both at
+session start. The router reads whole milliseconds, so the mod rounds the deadline of a fractional `timeout` up to the
+next whole millisecond.
+
+A subagent parks the same way on its own open set when its turn ends. A subagent whose turn ends with nothing open
+reports `released`, since its work went back to its parent, and its next turn under the same id starts it again with
+`agent_start`.
+
+An entry leaves its open set on the first of these:
+
+- a stop event of main or of a subagent whose background list no longer runs it
+- the end of a subagent: its release at its turn end, or the client's agent list reading it ended or no longer naming it
+- the first heartbeat after a background command's deadline
+- main's next real prompt, for every command an earlier turn of main started, still running or not
+
+A long-running command, such as a dev server, therefore parks main only until main's next real prompt. A prompt typed
+into main's running turn keeps the commands that turn started. A cron leaves the crons when CronDelete removes it or
+when it fires as a one-shot, however far away that is, since a one-shot has no age limit. A recurring cron moves to its
+next fire each time it fires, until the fire at which it is seven days old: the client removes it after that fire, and
+so does the mod. A new ScheduleWakeup replaces the pending wakeup, and one called with `stop` cancels it.
+
+Two wakeups never reach the mod: the fallback wakeup Claude Code arms on its own when the model does not reschedule a
+`/loop` turn, and the durable crons a previous process left in `.claude/scheduled_tasks.json`. While one of them is
+pending, main reads `idle`, and the router's idle ceiling ([The ceilings](../router/keepalive.md#the-ceilings)) governs
+how long the cache stays warm for it.
+
+## Presence
+
+`prompt.edit` fires while the person types at the prompt. The mod reports it as `activity` kind `presence` for main, at
+most once a minute. The router resets main's idle clock on a presence and does nothing else with it, so no agent turns
+busy and no state changes.
+
+## The owner header
+
+At session start the mod fences the process: it mints two v4 uuids, the owner id and the instance id, and writes one
+`X-Keepalive-Owner-Id: <owner id>` line into `ANTHROPIC_CUSTOM_HEADERS`. That line replaces any owner line already
+there, whatever the case of the header's name, and the variable keeps its other lines. Claude Code sends the header on
+every model request of the process, so the router can tell this process's requests from another process's on the same
+session id. The mod keeps the instance id in `PHOEBIS_KEEPALIVE_INSTANCE`. Every report names the instance, and every
+`session_start` names the owner as `owner_id`, which no other report carries. A `/clear` or a `/resume` keeps both ids,
+since the owner is the process.
+
+Claude Code holds the pair in the plugin's own state for the session, and that state survives a hot reload of the
+module. The mod also keeps the pair in the plugin's store under the key `identities`, beside the identity of the client
+process it was minted in, for the newest eight processes. The store outlives the session, so a reload after a `/clear`
+or a `/resume`, under either id, finds the pair there when the session's state holds none. A reload reuses the pair
+while the two variables still name it, so the owner line and the instance stay, and the router's session keeps its
+owner. A child process inherits the two variables but runs as another process, for which the store holds no pair, so it
+mints its own pair and registers as its own instance. Where Claude Code cannot run the command that reads the process's
+identity, a reload after a `/clear` mints a new pair. A child process that never runs the fence keeps the parent's owner
+line: one on a client older than the floor, where the mod writes only the line [Install](install.md#install) names, one
+with the mod disabled, or one without a URL or a key. That line matters only for a child that sends the parent's session
+id.
+
+A `session_start` the router refuses with a bare `instance_conflict`, since another instance holds the session under a
+live lease, leaves the session live. The mod writes one line to the transcript, `phoebis-companion: another instance
+reports session <id>, so the start is retried once its lease lapses`, and sends the start again under its backoff, from
+one second up to thirty and every thirty seconds from then on. Once the holder's 90-second lease lapses, the router
+names the silent holder, and the mod's next start takes the session over with `previous_instance_id`: the router
+replaces the session's agents, the next requests arm recipes again, and the mod writes `phoebis-companion: took over
+session <id> from a silent instance`.
+
+What the router does with a request whose owner header names another owner than the session's registration is on the
+router's page [The companion mod](../router/companion-mod.md), under "An owner mismatch".
+
+## What the mod leaves alone
+
+The mod runs one shell command at load, `echo $PPID`, to read the client process's identity, and no other. It hooks two
+settings-hook events, `classic.Stop` and `classic.SubagentStop`, for the background list they carry, and reads no
+transcript, no background command's output and no conversation text. It reads no file. It keeps the key `identities` in
+its own store, which Claude Code holds as a file under the user's configuration directory, and its four settings live
+where Claude Code keeps a plugin's configuration, the Router key in its secure storage.
