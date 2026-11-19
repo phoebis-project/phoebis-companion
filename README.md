@@ -14,9 +14,9 @@ holds no policy: every ceiling and switch belongs to the router, and what a key'
 on the key.
 
 The documentation lives under [`docs/site/`](docs/site/index.md), starting with [Install and
-settings](docs/site/install.md), and is published at <https://phoebis-project.github.io/phoebis-docs/> once GitHub Pages
-is enabled for the documentation site. It covers the settings, the start check, the tool and what the mod reports in
-full, and the key's permissions stand in the router's part of the same site.
+settings](docs/site/install.md), and is published at <https://phoebis-project.github.io/phoebis-docs/>. It covers the
+settings, the start check, the tool and what the mod reports in full, and the key's permissions stand in the router's
+part of the same site.
 
 ## Install
 
