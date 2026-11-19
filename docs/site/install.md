@@ -14,8 +14,8 @@ The install line resolves once the marketplace is added. From a shell, `claude p
 [the companion repository](https://github.com/phoebis-project/phoebis-companion) for one session.
 
 The mod needs Claude Code 2.1.299 or later. An older client runs the session without the mod: its engine refuses the
-hooks module, with the refusal in Claude Code's debug log and, for a headless run, on its error output (checked on
-Claude Code 2.1.287 and 2.1.296).
+hooks module and writes the refusal to Claude Code's debug log. A headless run with text output that loads a checkout
+with `--plugin-dir` also writes it to its error output (checked on Claude Code 2.1.287 and 2.1.296).
 
 ## Configure
 
