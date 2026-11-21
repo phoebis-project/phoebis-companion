@@ -57,7 +57,10 @@ export type GitAnswer = { exitCode: number; stdout: string } | { reject: string 
 export type FakeOptions = {
   /** What `$.session.id()` answers until `setId` changes it. */
   id?: string
-  /** The identity the host already holds for the plugin, as it does across a hot reload of the module. */
+  /**
+   * The identity the host already holds for the plugin under the starting id, as it does across a hot reload of the
+   * module.
+   */
   state?: Identity
   /** The other values the host already holds for the plugin, by key, as it does across a hot reload of the module. */
   values?: Record<string, unknown>
@@ -106,7 +109,7 @@ export type FakeRouter = {
   toasts: string[]
   /** Every `$.env.set` with its name and value, in order. */
   envWrites: EnvWrite[]
-  /** The identity the mod wrote through `$.state.set`, absent until it writes one. */
+  /** The identity the mod last wrote through `$.state.set`, under any session id, absent until it writes one. */
   state?: Identity
   /** The other values the mod wrote through `$.state.set`, by key, each the last write. */
   values: Map<string, unknown>
@@ -328,8 +331,11 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   // The last sequence the router took per session and instance, so a report at or below it is refused as the router
   // refuses it.
   const sequences = new Map<string, number>()
-  let identity = options.state
-  let stateVersion = identity === undefined ? 0 : 1
+  // The host keeps the plugin's state per session, so after a clear or a resume the new id reads nothing written under
+  // the earlier one.
+  const identities = new Map<string, Identity>()
+  if (options.state !== undefined) identities.set(id, options.state)
+  let stateVersion = options.state === undefined ? 0 : 1
   const values = new Map(Object.entries(options.values ?? {}))
   let spawned = 0
 
@@ -554,7 +560,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
       await clock.sleep(ms)
     }
     if (e.key !== 'identity') return { value: { value: values.get(e.key), version: values.has(e.key) ? 1 : 0 } }
-    return { value: { value: identity, version: stateVersion } }
+    return { value: { value: identities.get(id), version: identities.has(id) ? stateVersion : 0 } }
   })
   on('state.set', (_$, e) => {
     router.reached.push('state.set')
@@ -571,7 +577,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
       modelWriteDelayMs = 0
       return clock.sleep(ms).then(write)
     }
-    identity = e.value as Identity
+    identities.set(id, e.value as Identity)
     stateVersion += 1
     router.state = e.value as Identity
     return { value: { isSet: true, version: stateVersion } }
