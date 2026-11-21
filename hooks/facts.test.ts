@@ -655,6 +655,19 @@ test('an agent type past its cap leaves without the type', AGENTS, async ($, on)
   expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1', description: 'Review the retry loop' }])
 })
 
+test('a branch, a path or a remote past its cap leaves without that member',
+  { options: { management_url: ROUTER_URL, report_project: true, report_title: true } }, async ($, on) => {
+    const path = 'a'.repeat(1025)
+    // Reduced to `git.example/` and the 1,013 letters, 1,025 bytes.
+    const remote = `https://git.example/${'p'.repeat(1013)}`
+    const { clock, router } = host(on, { place: { cwd: path, repo: { remote, root: path }, root: path } })
+    router.answerGit(() => onBranch('b'.repeat(257)))
+    await titled($, clock, 'SessionStart', 'session-a', 'Checkout retry')
+    await start($, clock)
+    // The title shows that the read ran, so each missing member was dropped at its cap.
+    expect(facts(router)).toEqual([{ title: 'Checkout retry' }])
+  })
+
 test('an agent list that answers behind a clear adopts no agent', AGENTS, async ($, on) => {
   const { clock, router } = host(on)
   router.setAgents([{ id: 'worker-1', status: 'running', description: 'Review the retry loop', name: 'reviewer' }])
