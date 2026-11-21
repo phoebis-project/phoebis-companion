@@ -13,10 +13,11 @@ const STOREFRONT: FakePlace = {
   repo: { remote: 'git@git.example:acme/storefront.git', root: '/home/dev/work/storefront' },
   root: '/home/dev/work/storefront',
 }
+// Three paths, as a worktree has them, so a case tells the three path members apart.
 const BILLING: FakePlace = {
-  cwd: '/home/dev/work/billing-service',
+  cwd: '/home/dev/work/billing-service.worktrees/tax/api',
   repo: { remote: 'git@git.example:acme/billing-service.git', root: '/home/dev/work/billing-service' },
-  root: '/home/dev/work/billing-service',
+  root: '/home/dev/work/billing-service.worktrees/tax',
 }
 const GIT = ['git', 'symbolic-ref', '--short', '-q', 'HEAD']
 // What STOREFRONT reports without a branch.
@@ -271,7 +272,7 @@ test('a default install sends no facts report and runs no git command', CONFIGUR
   expect(events(router)).toContain('heartbeat')
   expect(events(router)).not.toContain('session_facts')
   expect(events(router)).not.toContain('agent_facts')
-  expect(router.commands.filter((argv) => argv[0] === 'git')).toEqual([])
+  expect(gitRuns(router)).toEqual([])
 })
 
 test('a set that stays the same is sent once, and a changed branch sends it again', PLACED, async ($, on) => {
@@ -292,51 +293,32 @@ test('a remote leaves as host and path, and one the rule cannot read does not le
   const { clock, router } = host(on)
   await start($, clock)
   // Each row stands in its own directory, so each set differs and each prompt sends one.
-  const rows: [number, string][] = [
-    [1, 'https://user:token@Git.Example/acme/storefront.git?x=1#f'],
-    [2, 'git@git.example:acme/storefront.git'],
-    [3, 'ssh://git@git.example:2222/acme/storefront/'],
-    [5, 'file:///srv/git/storefront.git'],
-    [6, '/srv/git/storefront.git'],
-    [7, 'C:\\work\\storefront'],
-    [8, 'https://user:pa/ss@git.example/acme/storefront.git'],
-    [9, 'ssh://git@[2001:db8::1]:2222/acme/storefront.git'],
-    [10, 'https://to/ken?x@git.example/acme/storefront.git'],
-    [11, 'https://user:8080/pa#ss@git.example/acme/storefront.git'],
-    [12, 'user:pa/ss?x@git.example:acme/storefront.git'],
-    [13, 'file://localhost/srv/git/notes.git'],
-    [14, 'https://git.example/acme/tools.git.git'],
-    [16, `https://git.example/acme/storefront.git?${'x'.repeat(1000)}`],
-    [17, 'https://git.example:abc/acme/storefront.git'],
-    [20, 'C:/work/storefront'],
-    [21, 'ssh://git@[2001:db8::1:2222/acme/storefront.git'],
-    [22, 'https://Git.\u00C9xample/acme/storefront.git'],
+  const rows: [string, string | undefined][] = [
+    ['https://user:token@Git.Example/acme/storefront.git?x=1#f', 'git.example/acme/storefront'],
+    ['git@git.example:acme/storefront.git', 'git.example/acme/storefront'],
+    ['ssh://git@git.example:2222/acme/storefront/', 'git.example/acme/storefront'],
+    ['file:///srv/git/storefront.git', undefined],
+    ['/srv/git/storefront.git', undefined],
+    ['C:\\work\\storefront', undefined],
+    ['https://user:pa/ss@git.example/acme/storefront.git', undefined],
+    ['ssh://git@[2001:db8::1]:2222/acme/storefront.git', '[2001:db8::1]/acme/storefront'],
+    ['https://to/ken?x@git.example/acme/storefront.git', undefined],
+    ['https://user:8080/pa#ss@git.example/acme/storefront.git', undefined],
+    ['user:pa/ss?x@git.example:acme/storefront.git', undefined],
+    ['file://localhost/srv/git/notes.git', undefined],
+    ['https://git.example/acme/tools.git.git', 'git.example/acme/tools.git'],
+    [`https://git.example/acme/storefront.git?${'x'.repeat(1000)}`, 'git.example/acme/storefront'],
+    ['https://git.example:abc/acme/storefront.git', undefined],
+    ['C:/work/storefront', undefined],
+    ['ssh://git@[2001:db8::1:2222/acme/storefront.git', undefined],
+    ['https://Git.\u00C9xample/acme/storefront.git', 'git.\u00C9xample/acme/storefront'],
   ]
-  for (const [row, remote] of rows) {
-    const root = `/home/dev/work/r${row}`
+  for (const [at, [remote]] of rows.entries()) {
+    const root = `/home/dev/work/r${at}`
     router.setPlace({ cwd: root, repo: { remote, root }, root })
     await prompt($, clock)
   }
-  expect(facts(router).map((body) => body.repository)).toEqual([
-    'git.example/acme/storefront',
-    'git.example/acme/storefront',
-    'git.example/acme/storefront',
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    '[2001:db8::1]/acme/storefront',
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    'git.example/acme/tools.git',
-    'git.example/acme/storefront',
-    undefined,
-    undefined,
-    undefined,
-    'git.\u00C9xample/acme/storefront',
-  ])
+  expect(facts(router).map((body) => body.repository)).toEqual(rows.map(([, repository]) => repository))
 })
 
 test('a session outside a repository runs no git command', PLACED, async ($, on) => {
@@ -460,8 +442,8 @@ test('a read whose working directory moved under git counts for nothing', PLACED
   await prompt($, clock)
   expect(facts(router)).toEqual([{
     branch: 'feature/tax',
-    cwd: '/home/dev/work/billing-service',
-    project: '/home/dev/work/billing-service',
+    cwd: '/home/dev/work/billing-service.worktrees/tax/api',
+    project: '/home/dev/work/billing-service.worktrees/tax',
     repository: 'git.example/acme/billing-service',
     repository_root: '/home/dev/work/billing-service',
   }])
