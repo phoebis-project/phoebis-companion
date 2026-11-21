@@ -619,6 +619,33 @@ test('a set queued under one key does not go to the router a later start names w
     }])
   })
 
+test('a set queued for one router URL does not go to the URL a later start names',
+  { options: { report_project: true } }, async ($, on) => {
+    // With no Management URL, the router's URL comes from ANTHROPIC_BASE_URL, which the second start reads anew.
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY], ['ANTHROPIC_BASE_URL', ROUTER_URL]])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock, { id: 'session-a', place: STOREFRONT })
+    router.answerGit(() => onBranch('main'))
+    router.answer((_body, ack) => ok(ack))
+    router.answer(() => ({ status: 503 }))
+    await start($, clock)
+    variables.set('ANTHROPIC_BASE_URL', 'http://127.0.0.1:2')
+    router.setPlace(BILLING)
+    const registered = heldGit(router)
+    await start($, clock)
+    await clock.advance(1000)
+    registered(onBranch('feature/tax'))
+    await clock.settle()
+    expect(facts(router)).toEqual([{ ...STOREFRONT_FACTS, branch: 'main' }, {
+      branch: 'feature/tax',
+      cwd: '/home/dev/work/billing-service.worktrees/tax/api',
+      project: '/home/dev/work/billing-service.worktrees/tax',
+      repository: 'git.example/acme/billing-service',
+      repository_root: '/home/dev/work/billing-service',
+    }])
+  })
+
 test('a move ahead of the directory\'s answer leaves the read with the new place whole', PLACED, async ($, on) => {
   const { clock, router } = host(on, { place: STOREFRONT })
   // The registration's read asks for the directory first, and the host answers it a second late, after a move.
