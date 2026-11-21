@@ -357,6 +357,17 @@ test('a title event ahead of the start outranks the saved title', TITLED, async 
   expect(facts(router)).toEqual([{}])
 })
 
+test('a page that answers a clear with 200 leaves the clear to go out again under the facts backoff', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
+    router.answer((_body, ack) => ok(ack))
+    // Something in front of the router answers the clear with a page of its own.
+    router.answer(() => ({ status: 200, body: '<!doctype html>' }))
+    await start($, clock)
+    await clock.advance(1000)
+    expect(facts(router)).toEqual([{}, {}])
+  })
+
 test('a clear the router refuses is not sent again at the next registration', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
   router.answer((_body, ack) => ok(ack))

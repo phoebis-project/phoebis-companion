@@ -947,6 +947,8 @@ type Answer = {
   request_generation?: number
   agent_id?: string
   instance_id?: string
+  session_id?: string
+  sequence?: number
   agents?: AnsweredAgent[]
 }
 
@@ -971,6 +973,8 @@ function answerOf(text: string): Answer {
   if (typeof value.request_generation === 'number') answer.request_generation = value.request_generation
   if (typeof value.agent_id === 'string') answer.agent_id = value.agent_id
   if (typeof value.instance_id === 'string') answer.instance_id = value.instance_id
+  if (typeof value.session_id === 'string') answer.session_id = value.session_id
+  if (typeof value.sequence === 'number') answer.sequence = value.sequence
   if (Array.isArray(value.agents)) {
     answer.agents = []
     for (const entry of value.agents) {
@@ -999,14 +1003,20 @@ function settle($: EngineInterface, config: Settings, record: SessionRecord, rep
     deferAgent($, report.agent_id, now)
     return
   }
-  if (response === undefined || response.status === 429 || response.status >= 500) {
+  const answer = response?.ok === true ? answerOf(response.text) : undefined
+  // A facts report settles on the router's acknowledgment alone, which names the session and the report's sequence,
+  // the record's while the report is out. A 2xx page from something in front of the router would otherwise drop the
+  // owed mark of a clear for good, and the router would keep the withdrawn value.
+  const unacknowledged = answer !== undefined && isFacts(report) &&
+    (answer.session_id !== record.id || answer.sequence !== record.sequence)
+  if (response === undefined || response.status === 429 || response.status >= 500 || unacknowledged) {
     queue.reports = restore(queue.reports, report)
     // A facts report waits under a backoff of its own, so the lifecycle's reports go on meanwhile.
     delay($, isFacts(report) ? queue.facts : queue.lifecycle, now)
     return
   }
-  if (response.ok) {
-    acknowledged($, record, report, answerOf(response.text), now, listed)
+  if (answer !== undefined) {
+    acknowledged($, record, report, answer, now, listed)
     return
   }
   if (response.status === 401 || response.status === 403) {
