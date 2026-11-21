@@ -358,6 +358,26 @@ test('a write of the tracked work that the host lands last holds no withdrawn ti
   expect((router.values.get('model') as { facts?: unknown }).facts).toEqual({})
 })
 
+test('a write of the tracked work the host refuses is written again by the next pump, which sends what waits',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    // Main's turn end changes the work, and the host refuses its write, so the pump that issued it sends nothing.
+    router.denyModelWrite('the host refuses the write')
+    await complete($, clock)
+    expect(events(router)).toEqual(['session_start'])
+    // The heartbeat's pump finds the work unchanged since the refused write.
+    await clock.advance(25000)
+    expect(events(router)).toEqual(['session_start', 'state', 'heartbeat'])
+    expect(router.values.get('model')).toEqual({
+      id: 'session-a',
+      agents: [{ id: 'main', state: 'idle', open: [], lastPresence: 0 }],
+      crons: [],
+      released: [],
+      routerReleased: [],
+    })
+  })
+
 test('a clear owed at a reload goes out at the registration', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on, { state: IDENTITY, values: { model: OWED_MODEL } })
   await start($, clock)

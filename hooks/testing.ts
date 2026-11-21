@@ -188,6 +188,11 @@ export type FakeRouter = {
    * hook on the variable does, which rejects the call.
    */
   denyEnvSet: (reason: string) => void
+  /**
+   * Denies the next `$.state.set` of the plugin's tracked work with the reason, as a host whose hook on the write
+   * refuses it, which rejects the call.
+   */
+  denyModelWrite: (reason: string) => void
   /** Denies the next `$.tool.register` with the reason, as an engine that refuses the spec does. */
   denyRegister: (reason: string) => void
 }
@@ -309,6 +314,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const edits: (() => PromptEditResult)[] = []
   const submits: (() => PromptSubmitResult | Promise<PromptSubmitResult>)[] = []
   const envSetDenials: string[] = []
+  const modelWriteDenials: string[] = []
   const registerDenials: string[] = []
   let envSetDelayMs = 0
   let cwdDelayMs = 0
@@ -408,6 +414,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     denyEnvSet: (reason) => {
       envSetDenials.push(reason)
+    },
+    denyModelWrite: (reason) => {
+      modelWriteDenials.push(reason)
     },
     denyRegister: (reason) => {
       registerDenials.push(reason)
@@ -550,6 +559,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   on('state.set', (_$, e) => {
     router.reached.push('state.set')
     if (e.key !== 'identity') {
+      const denial = e.key === 'model' ? modelWriteDenials.shift() : undefined
+      if (denial !== undefined) return { deny: denial }
       const write = (): { value: { isSet: boolean; version: number } } => {
         values.set(e.key, e.value)
         router.values.set(e.key, e.value)
