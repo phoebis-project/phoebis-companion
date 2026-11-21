@@ -68,14 +68,18 @@ function headOf(value: string): { colon: number; open: boolean } {
 /** Whether a result reads as `host/path` itself, the form the router keeps as it is given. */
 function readsReduced(value: string): boolean {
   if (/[@?#\\ ]/.test(value) || value.includes('://') || /^[/.~]/.test(value)) return false
+  // A cut can leave white space other than U+0020 at an end, such as a no-break space ahead of `.git`. The router's
+  // text rule trims it, so the router would keep another value than the one this side compares.
+  if (/^\s|\s$/u.test(value)) return false
   const { colon, open } = headOf(value)
   // An opening bracket that never closes would hide each colon behind it from the colon test.
   return colon < 0 && !open
 }
 
 /**
- * The remote as `host/path`, or no value for a remote the rule cannot read. Git's own value is a URL, the `scp` form
- * or a local path, so a value in neither of the first two forms is a local path and sends nothing.
+ * The remote as `host/path`, or no value for a remote the rule cannot read. Git's own value is a URL with a scheme at
+ * its start, the `scp` form or a local path, so a value in neither of the first two forms is a local path and sends
+ * nothing.
  */
 function reduced(remote: string): string | undefined {
   // A `file` URL names a path on some machine, also behind an authority such as `localhost`.
@@ -84,6 +88,9 @@ function reduced(remote: string): string | undefined {
   let path: string
   const scheme = remote.indexOf('://')
   if (scheme >= 0) {
+    // The `scp` form holds no `://`, so one behind anything but a scheme belongs to a query, a directory's name or a
+    // git helper address, and one letter ahead of it is a Windows drive.
+    if (!/^[A-Za-z][A-Za-z0-9+.-]+$/.test(remote.slice(0, scheme))) return undefined
     const after = remote.slice(scheme + 3)
     const end = after.search(/[/?#]/)
     const authority = end < 0 ? after : after.slice(0, end)
@@ -96,6 +103,8 @@ function reduced(remote: string): string | undefined {
     // One letter ahead of the colon is a Windows drive.
     if (/^[A-Za-z]$/.test(left)) return undefined
     path = remote.slice(colon + 1)
+    // A second colon makes the value a git helper address, `transport::address`, whose address can be a local path.
+    if (path.startsWith(':')) return undefined
     host = left.slice(left.lastIndexOf('@') + 1)
   }
   // A raw `/`, `?` or `#` in a URL's credential ends the authority early, as a raw `:` in the `scp` form's ends the

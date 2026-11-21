@@ -409,6 +409,12 @@ test('a remote leaves as host and path, and one the rule cannot read does not le
     ['git@git.example:Acme/Storefront.git', 'git.example/Acme/Storefront'],
     ['https://git.example/acme/store front.git', undefined],
     ['https://git.example/acme\\storefront.git', undefined],
+    ['git@git.example:acme/storefront.git?next=https://git.example/acme/notes', undefined],
+    ['C://work/storefront.git', undefined],
+    ['gcrypt::/srv/git/storefront.git', undefined],
+    ['https://git.example/acme/storefront\u00A0.git', undefined],
+    ['https://\u00A0git.example/acme/storefront.git', undefined],
+    ['mirrors/storefront.git', undefined],
   ]
   for (const [at, [remote]] of rows.entries()) {
     const root = `/home/dev/work/r${at}`
