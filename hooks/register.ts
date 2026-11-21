@@ -42,7 +42,7 @@ export const register: Register = (on, options) => {
     // it replaced leaves that start current.
     installKeepalive(on, (status, under) => {
       if (status === 401 && current === under) current = undefined
-    }, { project: config.reportProject, title: config.reportTitle })
+    }, { agents: config.reportAgents, project: config.reportProject, title: config.reportTitle })
   }
 
   on('tool.call', { tool: TOOL_CALL }, async ($) => {

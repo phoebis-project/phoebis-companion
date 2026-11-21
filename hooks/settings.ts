@@ -14,6 +14,7 @@ type Options = {
   token: string
   keepalive: boolean
   notifications: boolean
+  reportAgents: boolean
   reportProject: boolean
   reportTitle: boolean
 }
@@ -61,6 +62,7 @@ export function optionsOf(options: PluginOptions): Options {
     token: typeof options.token === 'string' ? options.token : '',
     keepalive: typeof options.keepalive === 'boolean' ? options.keepalive : true,
     notifications: typeof options.notifications === 'boolean' ? options.notifications : true,
+    reportAgents: typeof options.report_agents === 'boolean' ? options.report_agents : false,
     reportProject: typeof options.report_project === 'boolean' ? options.report_project : false,
     reportTitle: typeof options.report_title === 'boolean' ? options.report_title : false,
   }

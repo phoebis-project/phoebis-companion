@@ -31,6 +31,7 @@ one:
 | Router key (`token`): the key, kept in Claude Code's secure storage | empty | `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN` |
 | Cache warming reports (`keepalive`): whether the lifecycle reports go out | on | none |
 | Start check toasts (`notifications`): whether a start check's transcript line also raises a toast | on | none |
+| Agent reports (`report_agents`): whether each subagent's description, type and name are reported | off | none |
 | Project reports (`report_project`): whether the project directory, the repository and the branch are reported | off | none |
 | Session title reports (`report_title`): whether the session's custom title is reported | off | none |
 
@@ -81,5 +82,7 @@ view](../router/console.md#sessions). The option needs Cache warming reports on.
 reported at the next start of the session ([Reported facts](reports.md#reported-facts)). With Project reports on, the
 mod reports the branch, the project directory, the repository as `host/path`, the repository's root and the working
 directory of the session. This option needs Cache warming reports on too. Turned off, it clears what it reported at the
-next start of the session. Each of these options works on every client the mod loads on, and where a client lacks what a
-fact is read from, the mod leaves that fact out and reports the rest.
+next start of the session. With Agent reports on, the mod reports each subagent's description, its type and its name. It
+needs Cache warming reports on as well and clears what it reported once it is turned off. Each of these options works on
+every client the mod loads on, and where a client lacks what a fact is read from, the mod leaves that fact out and
+reports the rest.

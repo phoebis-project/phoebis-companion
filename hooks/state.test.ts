@@ -153,7 +153,15 @@ function states(router: FakeRouter): string[] {
 }
 
 function record(open: SavedTask[]): AgentRecord {
-  return { id: 'main', state: 'idle', open: new Map(open.map((task) => [task.id, task])), lastPresence: 0 }
+  return {
+    id: 'main',
+    state: 'idle',
+    open: new Map(open.map((task) => [task.id, task])),
+    lastPresence: 0,
+    facts: {},
+    factsQueued: undefined,
+    factsOwed: false,
+  }
 }
 
 function cron(id: string, wakeAt: number): Cron {

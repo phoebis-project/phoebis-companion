@@ -6,12 +6,17 @@ export type Identity = { instance: string; owner: string }
 // session's crons, the subagents this run released and those the router last named released, under the session id
 // they belong to.
 export type SavedTask = { id: string; kind: 'command' | 'subagent'; deadline?: number }
+export type AgentFactSet = { agent_type?: string; description?: string; name?: string }
+// `facts` is the last set queued for the agent and `factsOwed` stands while the router has not answered that set for
+// good, kept for the same reasons as the session's set below.
 export type SavedAgent = {
   id: string
   parent?: string
   state: 'busy' | 'idle' | 'parked' | 'released'
   open: SavedTask[]
   lastPresence: number
+  facts?: AgentFactSet
+  factsOwed?: true
 }
 export type SavedCron = { id: string; wakeAt: number; recurring: boolean; expression?: string; createdAt: number }
 // The facts the mod last queued for the session, kept so that a read behind a reload sends a change alone, and so

@@ -308,6 +308,9 @@ test('queued reports collapse into one heartbeat, the newest state per agent and
     { event: 'activity', agent_id: 'main', kind: 'prompt' },
     { event: 'activity', agent_id: 'main', kind: 'presence' },
     { event: 'agent_start', agent_id: 'worker' },
+    { event: 'agent_facts', agent_id: 'worker', name: 'first' },
+    { event: 'agent_facts', agent_id: 'scout', name: 'scout' },
+    { event: 'agent_facts', agent_id: 'worker', description: 'Review the retry loop', name: 'second' },
     { event: 'session_facts', branch: 'main', title: 'second' },
     { event: 'session_start' },
     { event: 'session_start', previous_instance_id: 'instance-old' },
@@ -320,6 +323,8 @@ test('queued reports collapse into one heartbeat, the newest state per agent and
     { event: 'state', agent_id: 'worker', state: 'busy' },
     { event: 'state', agent_id: 'main', state: 'parked', park_kind: 'background', deadline: T0 },
     { event: 'activity', agent_id: 'main', kind: 'prompt' },
+    { event: 'agent_facts', agent_id: 'scout', name: 'scout' },
+    { event: 'agent_facts', agent_id: 'worker', description: 'Review the retry loop', name: 'second' },
     { event: 'session_facts', branch: 'main', title: 'second' },
   ])
   expect(collapse(queue, { event: 'session_end' })).toEqual([{ event: 'session_end' }])

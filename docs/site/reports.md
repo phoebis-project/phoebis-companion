@@ -2,7 +2,7 @@
 
 The mod reports on main, the session's own agent, and on each subagent the client lists. Each agent has an open set: the
 background commands and the subagents it started that have not ended yet. The session's crons and wakeups belong to
-main. Every report is one request to the router's keepalive route, and the route, the seven events with their fields,
+main. Every report is one request to the router's keepalive route, and the route, the eight events with their fields,
 the acknowledgment, the refusal codes and how the mod queues, sends and retries are on [The
 relay](../router/relay.md#the-keepalive-protocol).
 
@@ -14,19 +14,19 @@ relay](../router/relay.md#the-keepalive-protocol).
 | `prompt.submit` from `scheduled-trigger` | a cron or a wakeup fired | it leaves the crons or moves to its next fire |
 | `classic.UserPromptSubmit` | the session's custom title, with Session title reports on | none of its own: the mod keeps the title for the next read |
 | `prompt.edit` | the person is typing | `activity` kind `presence` for main, at most once a minute |
-| `turn.step` | a model request of main or a subagent | `state busy` when the agent was not busy |
-| `tool.call` before the tool runs | a tool runs | `state busy` when the agent was not busy |
+| `turn.step` | a model request of main or a subagent | `state busy` when the agent was not busy. A step of a loop the mod meets first reads the client's agent list, and where a clear or a resume replaced the session during that read, the step counts for no agent, with each option off too |
+| `tool.call` before the tool runs | a tool runs | `state busy` when the agent was not busy. A call of a loop the mod meets first reads the client's agent list, and where a clear or a resume replaced the session during that read, the call counts for no agent and what it starts joins no open set, with each option off too |
 | `tool.call` after Bash | a command started in the background | it joins the agent's open set with its deadline |
 | `tool.call` after CronCreate or ScheduleWakeup | a wakeup is scheduled | it joins the crons with its next fire |
 | `tool.call` after CronDelete | a cron is gone | it leaves the crons |
-| `agent.spawn` | a subagent started | `agent_start`, and it joins its parent's open set |
+| `agent.spawn` | a subagent started | `agent_start`, then `agent_facts` behind the start's acknowledgment with Agent reports on, and it joins its parent's open set |
 | `classic.Stop` | main's turn ended, with the client's background list | a command the background list no longer runs leaves its owner's open set |
 | `classic.SubagentStop` | a subagent's turn ended, with the background list | the same |
 | `turn.complete` of a subagent | the subagent's turn ended | `state parked` on its open set, or `state released` |
 | `turn.complete` of main | main's turn ended | `state idle`, or `state parked` with its park |
 | an acknowledged `session_start`, a `prompt.submit` and a `turn.complete` of main | the session's facts are read | `session_facts` where the set changed, and after each registration where the set or the last set sent holds a fact or a report is still owed to the router |
 | `session.end` | the session ends or changes id | `session_end`, one request |
-| the heartbeat timer | time passed | the session id check, the reconcile, then `heartbeat` |
+| the heartbeat timer | time passed | the session id check, the reconcile, then `heartbeat`, and with Agent reports on, `agent_facts` for an agent whose description, type or name changed on the client's list |
 
 A prompt is the person's own when its origin is `bridge` (sent through Remote Control), `composer` (typed at the
 prompt), `sdk` (handed over by an SDK host) or `slack-ping` (sent from Slack). The router marks main busy on that prompt
@@ -142,6 +142,15 @@ report again, also after a reload of the mod, since the mod keeps the last set i
 host state beside its tracked work. A router that does not know `session_facts` refuses each facts report with status
 400, and the mod drops it with one debug line and sends the set again only once it changes or the router acknowledges a
 registration.
+
+With Agent reports on, an `agent_facts` report carries a subagent's description, its type and its name, read from the
+spawn call and from then on from the client's agent list, and states the whole set as `session_facts` does. It goes out
+only for an agent the router acknowledged, behind its start, and each lifecycle report that may go out passes it. An
+agent that ends while its start is out is the one exception to that order: its set goes out once, ahead of its release,
+since the router holds the run only until then. Facts the router refuses for an agent it does not hold are dropped and
+never start an agent, and the set goes out again behind the agent's next acknowledged start. A clear the router has not
+acknowledged survives a reload, as the session's does. A description or a name is cut at 256 bytes on a whole character,
+and a type over 256 bytes is left out. A workflow's agents and main report none.
 
 ## The owner header
 

@@ -1,4 +1,4 @@
-import type { SessionFactSet } from '../types'
+import type { AgentFactSet, SessionFactSet } from '../types'
 
 // The facts the mod reports for display. Nothing here holds state. Each rule is the router's, applied here before a
 // value leaves the machine, so the set the mod compares for a change is the set the router keeps.
@@ -117,7 +117,10 @@ function reduced(remote: string): string | undefined {
   return readsReduced(result) ? result : undefined
 }
 
-/** The value where it is within `cap` bytes. A cut path, remote or branch would name another one, so none is cut. */
+/**
+ * The value where it is within `cap` bytes. A cut path, remote, branch or agent type would name another one, so none
+ * is cut.
+ */
 function within(value: string | undefined, cap: number): string | undefined {
   return value !== undefined && bytesOf(value) <= cap ? value : undefined
 }
@@ -139,6 +142,18 @@ export function sessionFactSet(read: SessionRead): SessionFactSet {
   if (root !== undefined) set.repository_root = root
   const title = cleaned(read.title)
   if (title !== undefined) set.title = cutTo(title, SHORT_CAP)
+  return set
+}
+
+/** An agent's set from a spawn call or a list row: each member cleaned and capped, one with no value left out. */
+export function agentFactSet(read: { description?: unknown; name?: unknown; type?: unknown }): AgentFactSet {
+  const set: AgentFactSet = {}
+  const type = within(cleaned(read.type), SHORT_CAP)
+  if (type !== undefined) set.agent_type = type
+  const description = cleaned(read.description)
+  if (description !== undefined) set.description = cutTo(description, SHORT_CAP)
+  const name = cleaned(read.name)
+  if (name !== undefined) set.name = cutTo(name, SHORT_CAP)
   return set
 }
 

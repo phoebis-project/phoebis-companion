@@ -2,12 +2,19 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { fakeRouter } from './testing'
-import type { FakeOptions, FakePlace, FakeRouter, GitAnswer, Reply } from './testing'
+import type { Answer, FakeOptions, FakePlace, FakeRouter, GitAnswer, Reply } from './testing'
 
 const ROUTER_URL = 'http://127.0.0.1:1'
 const CONFIGURED = { options: { management_url: ROUTER_URL } }
 const TITLED = { options: { management_url: ROUTER_URL, report_title: true } }
 const PLACED = { options: { management_url: ROUTER_URL, report_project: true } }
+const AGENTS = { options: { management_url: ROUTER_URL, report_agents: true } }
+// A spawn call's members, the list's row with the same three values, and the set they report.
+const REVIEWER = { description: 'Review the retry loop', name: 'reviewer', subagentType: 'code-reviewer' }
+const REVIEWER_ROW = { description: 'Review the retry loop', name: 'reviewer', type: 'code-reviewer' }
+const REVIEWER_FACTS = {
+  agent_id: 'worker-1', agent_type: 'code-reviewer', description: 'Review the retry loop', name: 'reviewer',
+}
 const STOREFRONT: FakePlace = {
   cwd: '/home/dev/work/storefront',
   repo: { remote: 'git@git.example:acme/storefront.git', root: '/home/dev/work/storefront' },
@@ -50,6 +57,30 @@ const OWED_MODEL = {
   facts: {},
   factsOwed: true,
 }
+// What a load left that reported a subagent's name, and one whose clear of the agent's set the router had not
+// acknowledged.
+const AGENT_MODEL = {
+  id: 'session-a',
+  agents: [
+    { id: 'main', state: 'busy', open: [{ id: 'worker-1', kind: 'subagent' }], lastPresence: 0 },
+    { id: 'worker-1', parent: 'main', state: 'busy', open: [], lastPresence: 0, facts: { name: 'reviewer' } },
+  ],
+  crons: [],
+  released: [],
+  routerReleased: [],
+}
+const AGENT_OWED_MODEL = {
+  ...AGENT_MODEL,
+  agents: [
+    { id: 'main', state: 'busy', open: [{ id: 'worker-1', kind: 'subagent' }], lastPresence: 0 },
+    { id: 'worker-1', parent: 'main', state: 'busy', open: [], lastPresence: 0, facts: {}, factsOwed: true },
+  ],
+}
+// The agents a router answers the reload's registration with, as it still holds the subagent the earlier load ran.
+const WORKER_HELD = [
+  { agent_id: 'main', state: 'busy', request_generation: 1 },
+  { agent_id: 'worker-1', state: 'busy', request_generation: 1 },
+]
 
 const ok = (body: unknown): Reply => ({ status: 200, body })
 const refusal = (code: string, extra: Record<string, unknown> = {}): Reply =>
@@ -78,6 +109,68 @@ async function end($: Engine, clock: MockClock, reason: 'clear' | 'resume' | 'ot
 
 function events(router: FakeRouter): string[] {
   return router.requests.map((body) => body.event)
+}
+
+// The bodies posted under one session id, a state with its agent and its state.
+function under(router: FakeRouter, id: string): string[] {
+  return router.requests.filter((body) => body.session_id === id)
+    .map((body) => body.event === 'state' ? `state ${body.agent_id} ${body.state}` : body.event)
+}
+
+async function spawn($: Engine, clock: MockClock, members: Record<string, unknown>): Promise<void> {
+  await $.agent.spawn({ prompt: '', ...members } as Parameters<Engine['agent']['spawn']>[0])
+  await clock.settle()
+}
+
+async function step($: Engine, clock: MockClock, agentId?: string): Promise<void> {
+  const stream = $.turn.step({
+    turnId: 'turn-1',
+    index: 0,
+    model: 'claude-haiku-4-5',
+    messageCount: 1,
+    ...(agentId === undefined ? {} : { agentId }),
+  })
+  for await (const _chunk of stream) {
+    // Read to the end, as the engine reads a step.
+  }
+  await clock.settle()
+}
+
+async function complete($: Engine, clock: MockClock, agentId?: string): Promise<void> {
+  await $.turn.complete({
+    turnId: 'turn-1',
+    reason: 'answer',
+    answer: '',
+    durationMs: 0,
+    isAborted: false,
+    ...(agentId === undefined ? {} : { agentId }),
+  })
+  await clock.settle()
+}
+
+// The members of each agent_facts body, in the order sent.
+function agentFacts(router: FakeRouter): Record<string, unknown>[] {
+  return router.requests.filter((body) => body.event === 'agent_facts')
+    .map(({ event: _e, instance_id: _i, protocol: _p, request_generation: _g, sequence: _q, session_id: _s,
+      ...members }) => members)
+}
+
+// The entry the saved model holds for one agent.
+function savedAgent(router: FakeRouter, id: string): unknown {
+  return (router.values.get('model') as { agents: { id: string }[] }).agents.find((agent) => agent.id === id)
+}
+
+// Holds the next spawn's answer open, and answers the function that ends it with the id the client gives the agent.
+function heldSpawn(router: FakeRouter): (agentId: string) => void {
+  let give: ((answer: { agentId: string }) => void) | undefined
+  router.answerSpawn(() => new Promise((resolve) => {
+    give = resolve
+  }))
+  return (agentId) => {
+    // A case whose spawn never reached the client would otherwise wait for an answer that never comes.
+    if (give === undefined) throw new Error('the held spawn never started')
+    give({ agentId })
+  }
 }
 
 // One of the two events a title rides, as the client raises it for the session.
@@ -447,4 +540,239 @@ test('a read whose working directory moved under git counts for nothing', PLACED
     repository: 'git.example/acme/billing-service',
     repository_root: '/home/dev/work/billing-service',
   }])
+})
+
+test('a spawn\'s facts follow its acknowledged start, and a workflow\'s agent sends none', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  router.answerSpawn(() => ({ agentId: 'worker-1' }))
+  await spawn($, clock, REVIEWER)
+  expect(events(router)).toEqual(['session_start', 'agent_start', 'agent_facts'])
+  expect(agentFacts(router)).toEqual([{
+    agent_id: 'worker-1', agent_type: 'code-reviewer', description: 'Review the retry loop', name: 'reviewer',
+  }])
+  router.answerSpawn(() => ({ agentId: 'flow-1' }))
+  await spawn($, clock, { ...REVIEWER, workflow: { runId: 'wf_1', agentIndex: 1 } })
+  expect(events(router)).toEqual(['session_start', 'agent_start', 'agent_facts'])
+})
+
+test('facts the router refuses for an unknown agent are dropped and start no agent', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  router.answer((_body, ack) => ok(ack))
+  router.answer((_body, ack) => ok(ack))
+  router.answer(() => refusal('unknown_agent'))
+  router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW }])
+  await start($, clock)
+  router.answerSpawn(() => ({ agentId: 'worker-1' }))
+  await spawn($, clock, REVIEWER)
+  // The heartbeat's tick at the end reads the list, whose row holds the set the router refused.
+  await clock.advance(25000)
+  expect(events(router)).toEqual(['session_start', 'agent_start', 'agent_facts', 'heartbeat'])
+})
+
+test('a tick sends an agent\'s facts where the client\'s list changed them, and none where it did not', AGENTS,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW }])
+    await start($, clock)
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await spawn($, clock, REVIEWER)
+    await clock.advance(25000)
+    expect(agentFacts(router)).toEqual([REVIEWER_FACTS])
+    router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW, description: 'Review the export job' }])
+    await clock.advance(25000)
+    const changed = {
+      agent_id: 'worker-1', agent_type: 'code-reviewer', description: 'Review the export job', name: 'reviewer',
+    }
+    expect(agentFacts(router)).toEqual([REVIEWER_FACTS, changed])
+    await clock.advance(25000)
+    expect(agentFacts(router)).toEqual([REVIEWER_FACTS, changed])
+  })
+
+test('an option turned off clears each announced agent\'s facts at the reload\'s registration', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_MODEL } })
+    // The list still runs the agent, so the tick reads its row.
+    router.setAgents([{ id: 'worker-1', status: 'running' }])
+    router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
+    await start($, clock)
+    expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
+    await clock.advance(25000)
+    expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
+  })
+
+test('an agent\'s clear the router did not acknowledge is saved as owed', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_MODEL } })
+  router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
+  router.answer(() => ({ status: 503 }))
+  await start($, clock)
+  expect(savedAgent(router, 'worker-1')).toEqual({
+    id: 'worker-1', parent: 'main', state: 'busy', open: [], lastPresence: 0, facts: {}, factsOwed: true,
+  })
+  await clock.advance(1000)
+  expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }, { agent_id: 'worker-1' }])
+  expect(savedAgent(router, 'worker-1')).toEqual({
+    id: 'worker-1', parent: 'main', state: 'busy', open: [], lastPresence: 0, facts: {},
+  })
+})
+
+test('an agent\'s clear owed at a reload goes out at the registration', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_OWED_MODEL } })
+  router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
+  await start($, clock)
+  expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
+})
+
+test('an agent type past its cap leaves without the type', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  router.answerSpawn(() => ({ agentId: 'worker-1' }))
+  await spawn($, clock, { description: 'Review the retry loop', subagentType: 'a'.repeat(257) })
+  expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1', description: 'Review the retry loop' }])
+})
+
+test('an agent list that answers behind a clear adopts no agent', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  router.setAgents([{ id: 'worker-1', status: 'running', description: 'Review the retry loop', name: 'reviewer' }])
+  await start($, clock)
+  router.delayList(1000)
+  const stepping = step($, clock, 'worker-1')
+  await clock.settle()
+  await end($, clock, 'clear', 'session-a')
+  router.setId('session-b')
+  await start($, clock)
+  // The new session starts with main busy, so its turn end rests main, and a step that counted for main would
+  // report it busy again.
+  await complete($, clock)
+  await clock.advance(1000)
+  await stepping
+  expect(under(router, 'session-b')).toEqual(['session_start', 'state main idle'])
+})
+
+test('a tool call whose list read a clear overtakes files nothing under the new session', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  router.setAgents([{ id: 'worker-1', status: 'running' }])
+  await start($, clock)
+  router.delayList(1000)
+  router.answerTool(() => ({ stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg-1' }))
+  const calling = $.tool.call({
+    tool: 'Bash', tool_use_id: 'toolu_1', command: 'sleep 600', run_in_background: true, agentId: 'worker-1',
+  } as Parameters<Engine['tool']['call']>[0])
+  await clock.settle()
+  await end($, clock, 'clear', 'session-a')
+  router.setId('session-b')
+  await start($, clock)
+  await clock.advance(1000)
+  await calling
+  await complete($, clock)
+  // A command filed under main would park main on it.
+  expect(under(router, 'session-b')).toEqual(['session_start', 'state main idle'])
+})
+
+test('a due heartbeat passes a backlog of facts reports', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  // A lease of nine seconds puts the heartbeat three seconds behind the registration.
+  router.answer((_body, ack) => ok({ ...ack, lease_expires_ms: clock.now() + 9000 }))
+  const late: Answer = async (body, ack) => {
+    if (body.event === 'agent_facts') await clock.sleep(2000)
+    return ok(ack)
+  }
+  // Each of the seven requests behind the registration: three starts, three facts reports and the heartbeat.
+  for (let request = 0; request < 7; request += 1) router.answer(late)
+  // The list holds what the spawns said, so the tick finds no set changed.
+  router.setAgents([
+    { id: 'worker-1', status: 'running', description: 'one', type: 'Explore' },
+    { id: 'worker-2', status: 'running', description: 'two', type: 'Explore' },
+    { id: 'worker-3', status: 'running', description: 'three', type: 'Explore' },
+  ])
+  await start($, clock)
+  router.answerSpawn(() => ({ agentId: 'worker-1' }))
+  router.answerSpawn(() => ({ agentId: 'worker-2' }))
+  router.answerSpawn(() => ({ agentId: 'worker-3' }))
+  await spawn($, clock, { description: 'one', subagentType: 'Explore' })
+  await spawn($, clock, { description: 'two', subagentType: 'Explore' })
+  await spawn($, clock, { description: 'three', subagentType: 'Explore' })
+  await clock.advance(4000)
+  // The heartbeat, queued behind the third agent's facts at the tick, leaves ahead of them.
+  expect(events(router)).toEqual([
+    'session_start', 'agent_start', 'agent_facts', 'agent_start', 'agent_start', 'agent_facts', 'heartbeat',
+    'agent_facts',
+  ])
+})
+
+test('restored facts of an agent the new registration does not acknowledge stay unsent', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW }])
+  // The registration, the start, the first facts and the heartbeat.
+  router.answer((_body, ack) => ok(ack))
+  router.answer((_body, ack) => ok(ack))
+  router.answer((_body, ack) => ok(ack))
+  router.answer((_body, ack) => ok(ack))
+  router.answer(() => refusal('unknown_instance'))
+  router.answer((_body, ack) => ok({
+    ...ack,
+    agents: [
+      { agent_id: 'main', state: 'busy', request_generation: 1 },
+      { agent_id: 'worker-1', state: 'released', request_generation: 2 },
+    ],
+  }))
+  await start($, clock)
+  router.answerSpawn(() => ({ agentId: 'worker-1' }))
+  await spawn($, clock, REVIEWER)
+  router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW, description: 'Review the export job' }])
+  await clock.advance(25000)
+  expect(events(router)).toEqual([
+    'session_start', 'agent_start', 'agent_facts', 'heartbeat', 'agent_facts', 'session_start',
+  ])
+})
+
+test('an agent that ends while its start is out sends its facts ahead of its release', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  router.answer((_body, ack) => ok(ack))
+  router.answer(async (_body, ack) => {
+    await clock.sleep(2000)
+    return ok(ack)
+  })
+  await start($, clock)
+  router.answerSpawn(() => ({ agentId: 'worker-1' }))
+  await spawn($, clock, REVIEWER)
+  router.setAgents([])
+  await complete($, clock, 'worker-1')
+  await clock.advance(2000)
+  expect(events(router)).toEqual(['session_start', 'agent_start', 'agent_facts', 'state'])
+  expect(agentFacts(router)).toEqual([REVIEWER_FACTS])
+  expect(router.requests[3]).toMatchObject({ agent_id: 'worker-1', state: 'released' })
+})
+
+test('a failed facts report of a run that ended early is passed by its release', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  router.answer((_body, ack) => ok(ack))
+  router.answer(async (_body, ack) => {
+    await clock.sleep(2000)
+    return ok(ack)
+  })
+  router.answer(() => ({ status: 503 }))
+  await start($, clock)
+  router.answerSpawn(() => ({ agentId: 'worker-1' }))
+  await spawn($, clock, REVIEWER)
+  router.setAgents([])
+  await complete($, clock, 'worker-1')
+  await clock.advance(2000)
+  // Past the facts' backoff of one second.
+  await clock.advance(2000)
+  expect(events(router)).toEqual(['session_start', 'agent_start', 'agent_facts', 'state'])
+})
+
+test('spawn facts for an agent its own step announced first go out as a changed set', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  router.setAgents([{ id: 'worker-1', status: 'running', type: 'code-reviewer' }])
+  await start($, clock)
+  const answer = heldSpawn(router)
+  const spawning = spawn($, clock, REVIEWER)
+  await clock.settle()
+  // The agent's own step adopts it from the list's row and announces it.
+  await step($, clock, 'worker-1')
+  answer('worker-1')
+  await spawning
+  expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1', agent_type: 'code-reviewer' }, REVIEWER_FACTS])
 })

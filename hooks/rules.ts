@@ -1,4 +1,4 @@
-import type { Identity, SavedAgent, SavedCron, SavedTask, SessionFactSet } from '../types'
+import type { AgentFactSet, Identity, SavedAgent, SavedCron, SavedTask, SessionFactSet } from '../types'
 
 // The rules the lifecycle computes with. Nothing here holds state: the session, the queue and the tracked work
 // belong to keepalive.ts.
@@ -11,10 +11,11 @@ export type Report =
   | { event: 'activity'; agent_id: string; kind: 'prompt' | 'presence' }
   | ({ event: 'state'; agent_id: string; state: SavedAgent['state'] } & Partial<ParkFields>)
   | ({ event: 'session_facts' } & SessionFactSet)
+  | ({ event: 'agent_facts'; agent_id: string } & AgentFactSet)
 
 /** A report of display state. Each other report is a lifecycle report and goes out ahead of it. */
 export function isFacts(report: Report): boolean {
-  return report.event === 'session_facts'
+  return report.event === 'session_facts' || report.event === 'agent_facts'
 }
 
 export type Body = Report & {
@@ -37,6 +38,12 @@ export type AgentRecord = {
   state: SavedAgent['state']
   open: Map<string, SavedTask>
   lastPresence: number
+  /** What the client last said of the agent, cleaned. Empty with the option off. */
+  facts: AgentFactSet
+  /** The set last queued for the agent, undefined while none was or once the router refused it as unknown. */
+  factsQueued: AgentFactSet | undefined
+  /** The router has not answered the last set queued for good. */
+  factsOwed: boolean
 }
 
 const PARK_KINDS = ['background', 'both', 'scheduled'] as const
@@ -161,6 +168,9 @@ export function collapse(queue: Report[], report: Report): Report[] {
     case 'session_facts':
       // The newest set stands for the session. It goes to the end, behind what was queued ahead of it.
       return [...queue.filter((queued) => queued.event !== 'session_facts'), report]
+    case 'agent_facts':
+      // The newest set stands for the agent, at the end, so it stays behind the agent's start.
+      return [...queue.filter((queued) => !sameAgent(queued, 'agent_facts', report.agent_id)), report]
   }
 }
 
@@ -189,6 +199,8 @@ function supersedes(queued: Report, report: Report): boolean {
         (queued.kind === 'prompt' || report.kind === 'presence')
     case 'session_facts':
       return queued.event === 'session_facts'
+    case 'agent_facts':
+      return sameAgent(queued, 'agent_facts', report.agent_id)
   }
 }
 

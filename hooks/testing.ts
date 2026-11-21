@@ -122,7 +122,14 @@ export type FakeRouter = {
    */
   setConfig: ($: Engine, change: ConfigChange) => Promise<ConfigSetResult>
   setId: (id: string) => void
-  setAgents: (list: readonly { id: string; status: string; type?: string; parentId?: string }[]) => void
+  setAgents: (list: readonly {
+    id: string
+    status: string
+    type?: string
+    description?: string
+    name?: string
+    parentId?: string
+  }[]) => void
   /** Moves the session's place for the reads that follow. */
   setPlace: (place: FakePlace) => void
   /** Replaces the default answer for the next request, and several calls answer the next requests in turn. */
@@ -282,7 +289,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   let id = options.id ?? 'session-a'
   // The fields the fake builds for an agent, which cover what a hook reads. The client's AgentInfo gains required
   // fields between releases, so the list is cast once, where the fake answers agent.list.
-  let agents: Pick<AgentInfo, 'description' | 'id' | 'parentId' | 'status' | 'type'>[] = []
+  let agents: Pick<AgentInfo, 'description' | 'id' | 'name' | 'parentId' | 'status' | 'type'>[] = []
   const answers: Answer[] = []
   const getAnswers: GetAnswer[] = []
   const tools: ((e: { tool: string }) => unknown)[] = []
@@ -337,7 +344,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
         id: agent.id,
         status: agent.status as AgentStatus,
         type: agent.type ?? 'general-purpose',
-        description: '',
+        description: agent.description ?? '',
+        ...(agent.name === undefined ? {} : { name: agent.name }),
         ...(agent.parentId === undefined ? {} : { parentId: agent.parentId }),
       }))
     },
