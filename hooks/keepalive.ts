@@ -828,8 +828,11 @@ async function guarded<T>(call: () => Promise<T>): Promise<T | undefined> {
 // The branch of the session's working directory. A detached HEAD, a host that runs no process, a missing git and the
 // timeout all answer none, since any other word would read as a branch's name.
 async function branchOf($: EngineInterface): Promise<string | undefined> {
-  const run = await guarded(() => $.process.run(['git', 'symbolic-ref', '--short', '-q', 'HEAD'], { timeoutMs: 2000 }))
-  return run?.exitCode === 0 ? run.stdout.split('\n')[0] : undefined
+  return guarded(async () => {
+    const { exitCode, stdout } = await $.process.run(['git', 'symbolic-ref', '--short', '-q', 'HEAD'],
+      { timeoutMs: 2000 })
+    return exitCode === 0 ? stdout.split('\n')[0] : undefined
+  })
 }
 
 // One read of the session's set. No hook awaits it.
@@ -1224,9 +1227,11 @@ function tick($: EngineInterface): void {
 async function processIdentity($: EngineInterface): Promise<string | undefined> {
   if (hostProcess !== undefined) return hostProcess.id
   // The API leaves nothing scoped to the process, so the shell's parent, the client process, names it.
-  const run = await guarded(() => $.process.run(['sh', '-c', 'echo $PPID']))
-  const text = run?.stdout.trim()
-  const id = run?.exitCode === 0 && text !== undefined && /^\d+$/.test(text) ? text : undefined
+  const id = await guarded(async () => {
+    const { exitCode, stdout } = await $.process.run(['sh', '-c', 'echo $PPID'])
+    const text = stdout.trim()
+    return exitCode === 0 && /^\d+$/.test(text) ? text : undefined
+  })
   hostProcess = { id }
   // Whether that parent is the client process rests on how the host spawns the shell, so the read shows in the log.
   if (id !== undefined) {
