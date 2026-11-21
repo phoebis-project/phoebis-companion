@@ -103,7 +103,7 @@ test('the token hook forwards the trimmed value to the writer', CONFIGURED, asyn
 })
 
 describe('a missing setting raises a toast beside its transcript line only while notifications is on', () => {
-  const line = 'phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL'
+  const line = 'no management URL from the option or ANTHROPIC_BASE_URL'
   const cases = [['on by default', {}, [line]], ['off', { notifications: false }, []]] as const
   for (const [name, options, toasts] of cases) {
     test(name, { options }, async ($, on) => {
@@ -147,7 +147,7 @@ test('a start that finds no router key leaves nothing reported under the setting
     await clock.advance(60000)
     expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'session_end'])
     expect(router.logs).toEqual([
-      { text: 'phoebis-companion: no router key from the option or the environment', to: 'transcript' },
+      { text: 'no router key from the option or the environment', to: 'transcript' },
     ])
   })
 

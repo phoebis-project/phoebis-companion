@@ -46,7 +46,7 @@ test('the allowance GET joins the path prefix and carries the bearer',
   })
 
 describe('a 401 at start writes one transcript line, empties the queue and registers no tool', () => {
-  const line = `phoebis-companion: the router at ${ROUTER} refused the key (401), so this session reports nothing`
+  const line = `the router at ${ROUTER} refused the key (401), so this session reports nothing`
   const cases = [
     ['with the toast on by default', {}, [line]],
     ['with notifications off', { notifications: false }, []],
@@ -70,7 +70,7 @@ test('a 403 companion_not_permitted registers no tool and writes a debug line on
   router.answerGet(() => ({ status: 403, body: { code: 'companion_not_permitted' } }))
   await start($, clock)
   expect(router.tools).toEqual([])
-  expect(router.logs).toEqual([{ text: 'phoebis-companion: this key may not read the allowance', to: 'debug' }])
+  expect(router.logs).toEqual([{ text: 'this key may not read the allowance', to: 'debug' }])
   expect(router.toasts).toEqual([])
   expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
 })
@@ -459,7 +459,7 @@ test('a key refused at a later start leaves nothing reported under the key an ea
     await clock.advance(60_000)
     expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'session_end'])
     expect(router.logs.filter((line) => line.to === 'transcript').map((line) => line.text)).toEqual([
-      `phoebis-companion: the router at ${ROUTER} refused the key (401), so this session reports nothing`,
+      `the router at ${ROUTER} refused the key (401), so this session reports nothing`,
     ])
   })
 

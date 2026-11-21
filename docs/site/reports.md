@@ -178,10 +178,10 @@ only for a child that sends the parent's session id.
 A `session_start` the router refuses with a bare `instance_conflict`, since another instance holds the session under a
 live lease, leaves the session live. The mod writes one line to the transcript, `phoebis-companion: another instance
 reports session <id>, so the start is retried once its lease lapses`, and sends the start again under its backoff, from
-one second up to thirty and every thirty seconds from then on. Once the holder's 90-second lease lapses, the router
-names the silent holder, and the mod's next start takes the session over with `previous_instance_id`: the router
-replaces the session's agents, the next requests arm recipes again, and the mod writes `phoebis-companion: took over
-session <id> from a silent instance`.
+one second up to thirty and every thirty seconds from then on. Claude Code shows each of the mod's transcript lines
+under the mod's name. Once the holder's 90-second lease lapses, the router names the silent holder, and the mod's next
+start takes the session over with `previous_instance_id`: the router replaces the session's agents, the next requests
+arm recipes again, and the mod writes `phoebis-companion: took over session <id> from a silent instance`.
 
 What the router does with a request whose owner header names another owner than the session's registration is on the
 router's page [The companion mod](../router/companion-mod.md), under "An owner mismatch".

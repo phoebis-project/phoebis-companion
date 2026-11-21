@@ -3,12 +3,13 @@
 At session start, once the settings resolve to a URL and a key, the mod sends one read of the allowance route, `GET
 /v0/companion/allowance?session_id=<id>` ([The companion routes](../router/relay.md#the-companion-routes)), before and
 apart from the keepalive registration, and waits up to three seconds for the answer. The answer settles three things at
-once: whether a router answers at the URL, whether the key is valid, and whether the key may read the allowance.
+once: whether a router answers at the URL, whether the key is valid, and whether the key may read the allowance. Claude
+Code shows each of the mod's transcript lines under the mod's name.
 
 | Answer | What the mod does |
 | --- | --- |
 | `200` with the allowance body | Registers the tool and keeps the body as the first entry of the tool's cache. No line. |
-| `403` with the code `companion_not_permitted` | Registers no tool, since the operator withheld the permission, and writes `phoebis-companion: this key may not read the allowance` to Claude Code's debug log alone. The lifecycle reports still go out. |
+| `403` with the code `companion_not_permitted` | Registers no tool, since the operator withheld the permission, and writes `this key may not read the allowance` to Claude Code's debug log alone, which tags the line with the mod's name. The lifecycle reports still go out. |
 | `401` | Writes `phoebis-companion: the router at <url> refused the key (401), so this session reports nothing` to the transcript, registers no tool, and empties the keepalive queue, as a `401` on the keepalive route does. |
 | anything else | Writes `phoebis-companion: no answer from the router at <url> (<status, failure or "not the allowance">), the allowance tool answers once it is back` to the transcript and registers the tool anyway. |
 

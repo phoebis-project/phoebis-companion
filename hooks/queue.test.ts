@@ -419,9 +419,9 @@ test('a bare instance_conflict keeps the session live and retries the start unde
     expect(router.times.slice(0, 9)).toEqual([0, 1000, 3000, 7000, 15000, 31000, 61000, 91000, 91000]
       .map((at) => T0 + at))
     expect(router.logs).toEqual([
-      { text: 'phoebis-companion: another instance reports session session-a, so the start is retried once its ' +
+      { text: 'another instance reports session session-a, so the start is retried once its ' +
         'lease lapses', to: 'transcript' },
-      { text: 'phoebis-companion: took over session session-a from a silent instance', to: 'transcript' },
+      { text: 'took over session session-a from a silent instance', to: 'transcript' },
     ])
     await prompt($, clock)
     expect(events(router).slice(-1)).toEqual(['activity'])
@@ -685,8 +685,8 @@ describe('session end is sent at once ahead of the queue and past the request in
 
 describe('the mod sends nothing without a url or without a key', () => {
   const loads = [
-    ['without a url', {}, {}, 'phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL'],
-    ['without a key', CONFIGURED.options, {}, 'phoebis-companion: no router key from the option or the environment'],
+    ['without a url', {}, {}, 'no management URL from the option or ANTHROPIC_BASE_URL'],
+    ['without a key', CONFIGURED.options, {}, 'no router key from the option or the environment'],
   ] as const
   for (const [name, options, variables, line] of loads) {
     test(name, { options }, async ($, on) => {
@@ -714,7 +714,7 @@ test('a token from the option without management_url sends nothing to ANTHROPIC_
   await end($, clock, 'other', 'session-a')
   expect(router.reached.filter((op) => ['http.fetch', 'env.set'].includes(op))).toEqual([])
   expect(router.logs).toEqual([{
-    text: 'phoebis-companion: the token setting needs the Management URL, so this session reports nothing',
+    text: 'the token setting needs the Management URL, so this session reports nothing',
     to: 'transcript',
   }])
 })
@@ -740,9 +740,9 @@ test('a report the router refuses with a 400 or a 413 is dropped with one debug 
   await clock.advance(5000)
   expect(events(router)).toEqual(['session_start', 'activity', 'activity'])
   expect(router.logs).toEqual([
-    { text: 'phoebis-companion: the router answered status 400 with code invalid_event to the activity report, so ' +
+    { text: 'the router answered status 400 with code invalid_event to the activity report, so ' +
       'the mod drops it', to: 'debug' },
-    { text: 'phoebis-companion: the router answered status 413 with no code to the activity report, so the mod ' +
+    { text: 'the router answered status 413 with no code to the activity report, so the mod ' +
       'drops it', to: 'debug' },
   ])
 })

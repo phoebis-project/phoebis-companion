@@ -42,7 +42,8 @@ through `ANTHROPIC_BASE_URL` with a router key in `ANTHROPIC_AUTH_TOKEN`, `ANTHR
 transcript line, `phoebis-companion: no management URL from the option or ANTHROPIC_BASE_URL` or `phoebis-companion: no
 router key from the option or the environment`, and does nothing else. A URL from either source that fails the check
 below writes `phoebis-companion: the management URL from the option or ANTHROPIC_BASE_URL is not usable (<reason>)`
-instead, and the mod does nothing else either.
+instead, and the mod does nothing else either. Claude Code shows each of the mod's transcript lines under the mod's
+name.
 
 A key set in Router key goes to the Management URL alone and never to the host `ANTHROPIC_BASE_URL` names. The settings
 are user-level: Claude Code reads a plugin's configuration from the user's settings file, a `--settings` file or managed

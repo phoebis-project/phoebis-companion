@@ -7,7 +7,6 @@ const CREDENTIAL = 'a URL with a username or password'
 const FRAGMENT = 'a URL with a fragment'
 const QUERY = 'a URL with a query'
 const NOT_HTTP = 'an http or https URL with a host'
-const PREFIX = 'phoebis-companion: '
 
 /** The fact groups the person switched on. Each is false in a default install. */
 export type FactOptions = { agents: boolean; project: boolean; title: boolean }
@@ -75,11 +74,13 @@ export function optionsOf(options: PluginOptions): Options {
   }
 }
 
-/** Writes one of the mod's lines under its prefix and answers the line, so a toast can show the same text. */
+/**
+ * Writes one of the mod's lines and answers it, so a toast can show the same text. Claude Code shows a line and a
+ * toast under the mod's name, so the text carries no name of its own.
+ */
 export function say($: EngineInterface, text: string, options?: Parameters<EngineInterface['ui']['log']>[1]): string {
-  const line = PREFIX + text
-  $.ui.log(line, options)
-  return line
+  $.ui.log(text, options)
+  return text
 }
 
 function given(value: string | undefined): string | undefined {

@@ -273,7 +273,7 @@ test('a facts report a router without the two events refuses is dropped and not 
     await prompt($, clock)
     expect(events(router)).toEqual(['session_start', 'session_facts', 'activity', 'activity'])
     expect(router.logs).toEqual([{
-      text: 'phoebis-companion: the router answered status 400 with code invalid_event to the session_facts ' +
+      text: 'the router answered status 400 with code invalid_event to the session_facts ' +
         'report, so the mod drops it',
       to: 'debug',
     }])
