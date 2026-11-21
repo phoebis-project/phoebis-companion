@@ -149,8 +149,10 @@ let seenTitle: { id: string; title: string | undefined } | undefined
 // Counts the session reads, so a read that finishes behind a later one changes nothing.
 let factReads = 0
 let factReadsDone = 0
-// Counts the transitions of the session record that began, so one overtaken while it read the held work moves nothing.
+// Counts the transitions of the session record that began, with the id the newest one read, so one that another
+// session's transition overtook while it read the held work moves nothing.
 let transitions = 0
+let newestTransition: string | undefined
 
 // A start or a state of the agent's still queued carries a run the router takes after any answer that named the
 // agent released, so that answer no longer says the router ended what the mod holds.
@@ -729,21 +731,25 @@ async function persistModel($: EngineInterface): Promise<void> {
   await run
 }
 
-async function ensureSession($: EngineInterface, isCurrent: () => boolean): Promise<void> {
+/** Answers whether a transition of another session overtook this caller's, so its session is one the host left. */
+async function ensureSession($: EngineInterface, isCurrent: () => boolean): Promise<boolean> {
   const id = await $.session.id()
   // The record moves only for a prompt or a start that is still current at each decision, since a start can lose its
   // currency while it waits. A stopped record under the current id is a conversation resumed after the session_end
   // closed it, so a current caller revives it.
   const kept = (): boolean => !isCurrent() || (session?.id === id && !session.stopped)
-  if (kept() || identity === undefined) return
+  if (kept() || identity === undefined) return false
   const mine = ++transitions
+  newestTransition = id
   // The same id in the same process is a reload of the module or a resume after its end, and the host still holds
   // its tracked work. A new id is a new conversation, so nothing the old one had open or scheduled carries over. Read
   // before the session moves, so a pump during the read never writes the old session's work under the new id.
   const held = heldModelFor((await $.state.get(MODEL_REF)).value, id)
-  // The host answers its calls in no stated order, so a transition that began behind this one read the host's id
-  // later and holds the session the host is in, whichever read of the held work lands last.
-  if (kept() || mine !== transitions) return
+  // The host answers its calls in no stated order, so a transition of another id that began behind this one read the
+  // host's id later and holds the session the host is in, whichever read of the held work lands last. One of the same
+  // id moves the record as this one does, so the first to land installs it and the other finds it kept.
+  if (mine !== transitions && newestTransition !== id) return true
+  if (kept()) return false
   session = {
     id,
     instance: identity.instance,
@@ -760,6 +766,7 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
   savedModel = undefined
   Object.assign(model, freshModel())
   if (held !== undefined) restoreModel(held, session)
+  return false
 }
 
 // The set a run left stands right ahead of the run's release and goes in the lifecycle's order, since the router
@@ -1405,7 +1412,9 @@ export function installKeepalive(on: On, refused: RefusalHandler, facts: FactOpt
   factOptions = facts
   on('prompt.submit', async ($, e, next) => {
     if (!active()) return next(e)
-    await ensureSession($, () => true)
+    // A prompt typed into a session the host left while the prompt's read of the held work was out belongs to that
+    // session, which no record stands for, so it counts for none.
+    if (await ensureSession($, () => true)) return next(e)
     // The client fired the cron whatever a hook beneath does with the prompt the fire raised.
     if (live() && e.origin.kind === 'scheduled-trigger') fired(await $.clock.now())
     void pump($)

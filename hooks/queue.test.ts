@@ -920,7 +920,7 @@ test('a start superseded while it waits never revives the session that ended mea
     expect(events(router)).toEqual(['session_start', 'session_end'])
   })
 
-test('a prompt whose read of the held work lands behind a later session\'s start leaves that session in place',
+test('a prompt whose read of the held work lands behind a later session\'s start files nothing under either session',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
     await start($, clock)
@@ -943,6 +943,32 @@ test('a prompt whose read of the held work lands behind a later session\'s start
     expect(router.requests.filter((body) => body.session_id === 'session-b')).toEqual([])
     expect(router.requests.filter((body) => body.event === 'agent_start').map((body) => body.session_id))
       .toEqual(['session-c'])
+    // The prompt was typed into session-b, so session-c gets no activity for it.
+    expect(router.requests.filter((body) => body.session_id === 'session-c').map((body) => body.event))
+      .toEqual(['session_start', 'agent_start'])
+  })
+
+test('a prompt and a start of one new id whose reads of the held work overlap file the prompt under that id',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    await end($, clock, 'clear', 'session-a')
+    router.setId('session-b')
+    // The prompt's read of the held work lands a second late, and a start of the same id begins meanwhile, whose read
+    // lands a second behind the prompt's.
+    router.delayModel(1000)
+    const prompting = $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    router.delayModel(2000)
+    const starting = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    await clock.advance(2000)
+    await prompting
+    await starting
+    await clock.settle()
+    // The start's repeat of the registration is idempotent on the router.
+    expect(router.requests.filter((body) => body.session_id === 'session-b').map((body) => body.event))
+      .toEqual(['session_start', 'activity', 'session_start'])
   })
 
 test('a start replaced while it waits in its fence registers no successor after a clear', CONFIGURED,
