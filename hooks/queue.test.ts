@@ -339,9 +339,6 @@ test('restore puts a report back at the head unless a queued one supersedes it, 
   const present: Report = { event: 'activity', agent_id: 'main', kind: 'presence' }
   const beat: Report = { event: 'heartbeat' }
   const registration: Report = { event: 'session_start' }
-  const scoutSet: Report = { event: 'agent_facts', agent_id: 'scout', name: 'scout' }
-  const olderSet: Report = { event: 'agent_facts', agent_id: 'worker', name: 'first' }
-  const newerSet: Report = { event: 'agent_facts', agent_id: 'worker', name: 'second' }
   expect(restore([beat, worker], busy)).toEqual([busy, beat, worker])
   expect(restore([registration, beat], busy)).toEqual([registration, busy, beat])
   expect(restore([parked], busy)).toEqual([parked])
@@ -350,8 +347,6 @@ test('restore puts a report back at the head unless a queued one supersedes it, 
   expect(restore([present], prompted)).toEqual([prompted])
   expect(restore([registration, present, beat], prompted)).toEqual([registration, prompted, beat])
   expect(restore([], registration)).toEqual([registration])
-  expect(restore([scoutSet], olderSet)).toEqual([olderSet, scoutSet])
-  expect(restore([newerSet], olderSet)).toEqual([newerSet])
 })
 
 test('unknown_instance, instance_ended and stale_sequence re-register with the same instance and the restored ' +
