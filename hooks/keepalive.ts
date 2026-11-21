@@ -1353,6 +1353,11 @@ export async function startKeepalive($: EngineInterface, resolved: Settings, isC
   // One step with no await, so no report goes out under these settings ahead of the registration. Its acknowledgment
   // is what schedules the heartbeat, so the session registers again whatever ended the previous settings, and a
   // registered session's repeat is idempotent on the router.
+  if (settings !== undefined && (settings.url !== resolved.url || settings.key !== resolved.key)) {
+    // A set queued for the earlier router would reach this one ahead of the set its registration reads. Each dropped
+    // set stays owed, so the registration's whole sends state the present sets.
+    queue.reports = queue.reports.filter((queued) => !isFacts(queued))
+  }
   settings = resolved
   reregister()
   void pump($)

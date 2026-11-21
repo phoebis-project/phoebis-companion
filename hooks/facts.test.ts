@@ -577,6 +577,34 @@ test('a read whose working directory moved under git counts for nothing', PLACED
   }])
 })
 
+test('a set queued under one key does not go to the router a later start names with another', PLACED,
+  async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'K1']])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock, { id: 'session-a', place: STOREFRONT })
+    router.answerGit(() => onBranch('main'))
+    router.answer((_body, ack) => ok(ack))
+    router.answer(() => ({ status: 503 }))
+    await start($, clock)
+    // The set waits for its retry while the session moves, and the start under K2 reads the new place behind a git
+    // call that answers past that retry.
+    variables.set('ANTHROPIC_AUTH_TOKEN', 'K2')
+    router.setPlace(BILLING)
+    const registered = heldGit(router)
+    await start($, clock)
+    await clock.advance(1000)
+    registered(onBranch('feature/tax'))
+    await clock.settle()
+    expect(facts(router)).toEqual([{ ...STOREFRONT_FACTS, branch: 'main' }, {
+      branch: 'feature/tax',
+      cwd: '/home/dev/work/billing-service.worktrees/tax/api',
+      project: '/home/dev/work/billing-service.worktrees/tax',
+      repository: 'git.example/acme/billing-service',
+      repository_root: '/home/dev/work/billing-service',
+    }])
+  })
+
 test('a spawn\'s facts follow its acknowledged start, and a workflow\'s agent sends none', AGENTS, async ($, on) => {
   const { clock, router } = host(on)
   await start($, clock)
