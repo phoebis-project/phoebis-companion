@@ -605,6 +605,23 @@ test('a set queued under one key does not go to the router a later start names w
     }])
   })
 
+test('a move ahead of the directory\'s answer leaves the read with the new place whole', PLACED, async ($, on) => {
+  const { clock, router } = host(on, { place: STOREFRONT })
+  // The registration's read asks for the directory first, and the host answers it a second late, after a move.
+  router.delayCwd(1000)
+  router.answerGit(() => onBranch('feature/tax'))
+  await start($, clock)
+  router.setPlace(BILLING)
+  await clock.advance(1000)
+  expect(facts(router)).toEqual([{
+    branch: 'feature/tax',
+    cwd: '/home/dev/work/billing-service.worktrees/tax/api',
+    project: '/home/dev/work/billing-service.worktrees/tax',
+    repository: 'git.example/acme/billing-service',
+    repository_root: '/home/dev/work/billing-service',
+  }])
+})
+
 test('a spawn\'s facts follow its acknowledged start, and a workflow\'s agent sends none', AGENTS, async ($, on) => {
   const { clock, router } = host(on)
   await start($, clock)

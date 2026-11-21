@@ -858,9 +858,10 @@ async function readSessionFacts($: EngineInterface): Promise<void> {
   const read: SessionRead = {}
   if (factOptions.project) {
     // Each call is guarded on its own: a client that lacks one, or a call that rejects, costs that call's facts alone.
-    const [project, cwd, repo] = await Promise.all([
+    // The directory comes first, so a move at any point behind its answer shows in the directory read behind git.
+    const cwd = await guarded(() => $.session.cwd())
+    const [project, repo] = await Promise.all([
       guarded(() => $.session.root()),
-      guarded(() => $.session.cwd()),
       guarded(() => $.session.repo()),
     ])
     read.project = project

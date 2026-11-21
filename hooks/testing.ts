@@ -165,6 +165,11 @@ export type FakeRouter = {
    * write lands, as a host whose hook on the write runs for a while does.
    */
   delayEnvSet: (ms: number) => void
+  /**
+   * Holds the next `$.session.cwd()` for this long on the clock, and it then answers the place as it stands, as a
+   * host answers a call after a move the person made meanwhile.
+   */
+  delayCwd: (ms: number) => void
   /** Holds the next `$.session.id()` for this long on the clock before it answers. */
   delayId: (ms: number) => void
   /** Holds the next `$.agent.list()` for this long on the clock before it answers. */
@@ -306,6 +311,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const envSetDenials: string[] = []
   const registerDenials: string[] = []
   let envSetDelayMs = 0
+  let cwdDelayMs = 0
   let idDelayMs = 0
   let listDelayMs = 0
   let modelDelayMs = 0
@@ -381,6 +387,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     delayEnvSet: (ms) => {
       envSetDelayMs = ms
+    },
+    delayCwd: (ms) => {
+      cwdDelayMs = ms
     },
     delayId: (ms) => {
       idDelayMs = ms
@@ -498,7 +507,10 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   })
   on('session.cwd', () => {
     router.reached.push('session.cwd')
-    return { value: place.cwd as string }
+    if (cwdDelayMs === 0) return { value: place.cwd as string }
+    const ms = cwdDelayMs
+    cwdDelayMs = 0
+    return clock.sleep(ms).then(() => ({ value: place.cwd as string }))
   })
   on('session.root', () => {
     router.reached.push('session.root')
