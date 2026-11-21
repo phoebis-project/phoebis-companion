@@ -14,6 +14,8 @@
       "description": "Report this session's liveness so the router keeps its caches warm." },
     "notifications": { "type": "boolean", "title": "Start check toasts", "default": true,
       "description": "Raise a toast beside each transcript line of the start check." },
+    "report_project": { "type": "boolean", "title": "Project reports", "default": false,
+      "description": "Report the project directory, the repository without credentials and the branch." },
     "report_title": { "type": "boolean", "title": "Session title reports", "default": false,
       "description": "Report this session's custom title to the router's Sessions view." }
   }

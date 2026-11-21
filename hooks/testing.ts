@@ -14,10 +14,10 @@ import type { Identity } from '../types'
 import type { Body } from './rules'
 
 // The recorded host beneath every mod test: the router behind `$.http.fetch` (the posted reports and the allowance
-// GETs), the session's id, the environment writes, the state the host holds for the plugin, the plugin's own store,
-// the command that reads the client process, the log, the toasts, the tools the mod registers, the agent list, and the
-// engine's own answers to the events a replay or a settings change raises, so no bottom hook throws for an event the
-// mod passes on.
+// GETs), the session's id and place, the environment writes, the state the host holds for the plugin, the plugin's own
+// store, the commands that read the client process and the branch, the log, the toasts, the tools the mod registers,
+// the agent list, and the engine's own answers to the events a replay or a settings change raises, so no bottom hook
+// throws for an event the mod passes on.
 
 type Ack = {
   session_id: string
@@ -43,6 +43,17 @@ export type Answer = (body: Body, ack: Ack) => Reply | Promise<Reply>
 /** A scripted answer to a GET, handed its URL and its headers with lower-cased names. */
 export type GetAnswer = (url: string, headers: Record<string, string>) => Reply | Promise<Reply>
 
+/** Where the fake host says the session stands. A member left out answers undefined. */
+export type FakePlace = {
+  cwd?: string
+  /** `null` outside a repository, and `'rejects'` for a call that fails. */
+  repo?: { remote: string | null; root: string } | null | 'rejects'
+  root?: string
+}
+
+/** One answer of git: what it printed with its exit code, or the reason the host ran no process. */
+export type GitAnswer = { exitCode: number; stdout: string } | { reject: string }
+
 export type FakeOptions = {
   /** What `$.session.id()` answers until `setId` changes it. */
   id?: string
@@ -57,6 +68,8 @@ export type FakeOptions = {
   process?: string
   /** What the plugin's own store holds at the start, by key, as the file it keeps across processes does. */
   store?: Record<string, unknown>
+  /** Where the session stands until `setPlace` moves it. */
+  place?: FakePlace
 }
 
 export type LogLine = { text: string; to: string }
@@ -110,6 +123,8 @@ export type FakeRouter = {
   setConfig: ($: Engine, change: ConfigChange) => Promise<ConfigSetResult>
   setId: (id: string) => void
   setAgents: (list: readonly { id: string; status: string; type?: string; parentId?: string }[]) => void
+  /** Moves the session's place for the reads that follow. */
+  setPlace: (place: FakePlace) => void
   /** Replaces the default answer for the next request, and several calls answer the next requests in turn. */
   answer: (fn: Answer) => void
   /** Replaces the default answer, a `200` with `SAMPLE_ALLOWANCE`, for the next GET, and several calls queue up. */
@@ -121,6 +136,12 @@ export type FakeRouter = {
   answerTool: (fn: (e: { tool: string }) => unknown) => void
   /** Scripts the next `agent.spawn`'s answer the same way, with the id the client gives the agent. */
   answerSpawn: (fn: () => { agentId: string } | Promise<{ agentId: string }>) => void
+  /**
+   * Scripts the next `$.process.run` whose vector starts with `git`, and several calls answer the next ones in turn.
+   * A function that answers a promise holds the call open until it settles. Without a script git answers exit code 1
+   * with no output, as it does on a detached HEAD.
+   */
+  answerGit: (fn: () => GitAnswer | Promise<GitAnswer>) => void
   /**
    * Scripts what the next `prompt.edit` resolves to beneath the mod, and several calls answer the next edits in turn.
    * A function that throws stands for a lower hook that rejects the edit.
@@ -266,6 +287,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const getAnswers: GetAnswer[] = []
   const tools: ((e: { tool: string }) => unknown)[] = []
   const spawns: (() => { agentId: string } | Promise<{ agentId: string }>)[] = []
+  const gits: (() => GitAnswer | Promise<GitAnswer>)[] = []
+  let place: FakePlace = options.place ?? {}
   const edits: (() => PromptEditResult)[] = []
   const submits: (() => PromptSubmitResult | Promise<PromptSubmitResult>)[] = []
   const envSetDenials: string[] = []
@@ -318,6 +341,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
         ...(agent.parentId === undefined ? {} : { parentId: agent.parentId }),
       }))
     },
+    setPlace: (next) => {
+      place = next
+    },
     answer: (fn) => {
       answers.push(fn)
     },
@@ -329,6 +355,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     answerSpawn: (fn) => {
       spawns.push(fn)
+    },
+    answerGit: (fn) => {
+      gits.push(fn)
     },
     answerEdit: (fn) => {
       edits.push(fn)
@@ -450,6 +479,20 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     }
     return { value: id }
   })
+  on('session.cwd', () => {
+    router.reached.push('session.cwd')
+    return { value: place.cwd as string }
+  })
+  on('session.root', () => {
+    router.reached.push('session.root')
+    return { value: place.root as string }
+  })
+  on('session.repo', () => {
+    router.reached.push('session.repo')
+    const repo = place.repo
+    if (repo === 'rejects') return { deny: 'no repository read' }
+    return { value: repo === undefined || repo === null ? repo as null : { ...repo, internal: false, name: null } }
+  })
   on('env.set', async (_$, e) => {
     router.reached.push('env.set')
     if (e.name === 'ANTHROPIC_CUSTOM_HEADERS') {
@@ -502,9 +545,23 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     router.store.set(e.key, JSON.parse(JSON.stringify(e.value)))
     return { value: undefined }
   })
-  on('process.run', (_$, e) => {
+  on('process.run', async (_$, e) => {
     router.reached.push('process.run')
     router.commands.push([...e.argv])
+    if (e.argv[0] === 'git') {
+      const scripted = gits.shift()
+      const answer = scripted === undefined ? { exitCode: 1, stdout: '' } : await scripted()
+      if ('reject' in answer) return { deny: answer.reject }
+      return {
+        value: {
+          exitCode: answer.exitCode,
+          stdout: answer.stdout,
+          stderr: '',
+          isStdoutTruncated: false,
+          isStderrTruncated: false,
+        },
+      }
+    }
     if (options.process === undefined) return { deny: 'this host runs no command' }
     return {
       value: {

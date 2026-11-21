@@ -116,6 +116,17 @@ and the mod reads the session's facts when the router acknowledges a `session_st
 each of main's turns. A title counts only for the session id its event names, so a title seen before a `/clear` never
 goes out under the new id. In a default install a session reports no fact.
 
+With Project reports on, the report also carries the branch, the project directory, the repository, the repository's
+root and the working directory of the session. The project directory is the session's root, the working directory its
+present directory, and the repository the `origin` remote reduced to `host/path` with the ASCII letters of the host in
+lower case: the scheme, the user information, the port, the query, the fragment, one trailing `.git` and each trailing
+slash are cut before the value leaves the machine, so no credential is sent. A `file` URL, a local path, a remote with
+an `@` behind its host part and each other remote the mod cannot read send no repository. The branch is read with
+`git symbolic-ref --short -q HEAD` in the session's working directory, at each read and only inside a repository, with a
+timeout of 2 seconds. A detached HEAD, a git call that fails, a host that runs no process, a missing git and the timeout
+send no branch, and a read during which the working directory changed sends nothing, so the next read reports the new
+place. A path or a reduced repository over 1,024 bytes and a branch over 256 bytes are left out.
+
 A `session_facts` report states the whole set, so a fact that is gone is left out of the next report and the router
 clears it. The mod sends the set where it changed, and after each acknowledged registration where the set or the last
 set sent holds a fact or where a report the router did not confirm is still owed, a clear among them, since the
@@ -166,7 +177,8 @@ router's page [The companion mod](../router/companion-mod.md), under "An owner m
 
 ## What the mod leaves alone
 
-The mod runs one shell command at load, `echo $PPID`, to read the client process's identity, and no other. It hooks two
+The mod runs one shell command at load, `echo $PPID`, to read the client process's identity. With Project reports on it
+also runs `git symbolic-ref --short -q HEAD` to read the branch, and it runs no other command. It hooks two
 settings-hook events, `classic.Stop` and `classic.SubagentStop`, for the background list they carry. With Session title
 reports on it also hooks `classic.SessionStart` and `classic.UserPromptSubmit` and reads their title member and their
 session id alone, never a prompt's text. It reads no transcript, no background command's output and no conversation

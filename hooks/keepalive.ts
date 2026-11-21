@@ -127,9 +127,9 @@ type RefusalHandler = (status: number, under: Settings) => void
 let onRefused: RefusalHandler = () => undefined
 
 /** The fact groups the person switched on. Each is false in a default install. */
-export type FactOptions = { title: boolean }
+export type FactOptions = { project: boolean; title: boolean }
 
-let factOptions: FactOptions = { title: false }
+let factOptions: FactOptions = { project: false, title: false }
 // The tracked work as the host last took it, so a pump writes it only when it changed.
 let savedModel: string | undefined
 // The reports already sent again under a generation the router named, so a second refusal drops them.
@@ -763,6 +763,28 @@ export function emptyQueue(): void {
   queue.reports = []
 }
 
+// The loader refuses a `$` member read as a value, so no presence is tested: a client that lacks the member throws at
+// the call, as one that rejects it does, and both answer no value.
+async function guarded<T>(call: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await call()
+  } catch {
+    return undefined
+  }
+}
+
+// The branch of the session's working directory. A detached HEAD, a host that runs no process, a missing git and the
+// timeout all answer none, since any other word would read as a branch's name.
+async function branchOf($: EngineInterface): Promise<string | undefined> {
+  try {
+    const { exitCode, stdout } = await $.process.run(['git', 'symbolic-ref', '--short', '-q', 'HEAD'],
+      { timeoutMs: 2000 })
+    return exitCode === 0 ? stdout.split('\n')[0] : undefined
+  } catch {
+    return undefined
+  }
+}
+
 // One read of the session's set. No hook awaits it.
 async function readSessionFacts($: EngineInterface): Promise<void> {
   const held = reporting()
@@ -770,6 +792,26 @@ async function readSessionFacts($: EngineInterface): Promise<void> {
   const { config, record } = held
   const mine = ++factReads
   const read: SessionRead = {}
+  if (factOptions.project) {
+    // Each call is guarded on its own: a client that lacks one, or a call that rejects, costs that call's facts alone.
+    const [project, cwd, repo] = await Promise.all([
+      guarded(() => $.session.root()),
+      guarded(() => $.session.cwd()),
+      guarded(() => $.session.repo()),
+    ])
+    read.project = project
+    read.cwd = cwd
+    if (repo !== undefined && repo !== null) {
+      read.repositoryRoot = repo.root
+      read.remote = repo.remote
+      read.branch = await branchOf($)
+      // Git ran in the working directory of its own start. Where that is no longer the directory this read took, the
+      // branch may be another repository's, so the read counts for nothing and the next one gathers the new place
+      // whole.
+      const moved = await guarded(() => $.session.cwd())
+      if (moved !== cwd) return
+    }
+  }
   if (factOptions.title && seenTitle?.id === record.id) read.title = seenTitle.title
   const set = sessionFactSet(read)
   // The read speaks for the reporting it started under. A clear, a resume, a session's end, a refused key or
