@@ -300,6 +300,7 @@ test('queued reports collapse into one heartbeat, the newest state per agent and
     { event: 'heartbeat' },
     { event: 'state', agent_id: 'main', state: 'busy' },
     { event: 'activity', agent_id: 'main', kind: 'presence' },
+    { event: 'session_facts', title: 'first' },
     { event: 'agent_start', agent_id: 'worker' },
     { event: 'heartbeat' },
     { event: 'state', agent_id: 'worker', state: 'busy' },
@@ -307,6 +308,7 @@ test('queued reports collapse into one heartbeat, the newest state per agent and
     { event: 'activity', agent_id: 'main', kind: 'prompt' },
     { event: 'activity', agent_id: 'main', kind: 'presence' },
     { event: 'agent_start', agent_id: 'worker' },
+    { event: 'session_facts', branch: 'main', title: 'second' },
     { event: 'session_start' },
     { event: 'session_start', previous_instance_id: 'instance-old' },
   ]
@@ -318,6 +320,7 @@ test('queued reports collapse into one heartbeat, the newest state per agent and
     { event: 'state', agent_id: 'worker', state: 'busy' },
     { event: 'state', agent_id: 'main', state: 'parked', park_kind: 'background', deadline: T0 },
     { event: 'activity', agent_id: 'main', kind: 'prompt' },
+    { event: 'session_facts', branch: 'main', title: 'second' },
   ])
   expect(collapse(queue, { event: 'session_end' })).toEqual([{ event: 'session_end' }])
 })

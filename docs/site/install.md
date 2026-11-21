@@ -31,6 +31,7 @@ one:
 | Router key (`token`): the key, kept in Claude Code's secure storage | empty | `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN` |
 | Cache warming reports (`keepalive`): whether the lifecycle reports go out | on | none |
 | Start check toasts (`notifications`): whether a start check's transcript line also raises a toast | on | none |
+| Session title reports (`report_title`): whether the session's custom title is reported | off | none |
 
 An empty or blank value counts as unset. The three variables rank as Claude Code ranks them when it picks its own
 credential, so the key the mod reports under is the key the client sends. When Claude Code already reaches the router
@@ -73,3 +74,9 @@ the mod has no other setting. A report that did not get through, for a transport
 again along a fixed backoff. A heartbeat goes out at a share of the remaining lease, within fixed bounds, and both
 figures are on [The relay](../router/relay.md#the-keepalive-protocol). A presence report goes out at most once a minute
 ([Presence](reports.md#presence)).
+
+With Session title reports on, the mod reports the title a `/rename` gave the session, for the console's [Sessions
+view](../router/console.md#sessions). The option needs Cache warming reports on. Turned off, it clears the title it
+reported at the next start of the session ([Reported facts](reports.md#reported-facts)). Each of these options works on
+every client the mod loads on, and where a client lacks what a fact is read from, the mod leaves that fact out and
+reports the rest.

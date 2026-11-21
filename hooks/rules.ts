@@ -1,4 +1,4 @@
-import type { Identity, SavedAgent, SavedCron, SavedTask } from '../types'
+import type { Identity, SavedAgent, SavedCron, SavedTask, SessionFactSet } from '../types'
 
 // The rules the lifecycle computes with. Nothing here holds state: the session, the queue and the tracked work
 // belong to keepalive.ts.
@@ -10,6 +10,12 @@ export type Report =
   | { event: 'agent_start'; agent_id: string }
   | { event: 'activity'; agent_id: string; kind: 'prompt' | 'presence' }
   | ({ event: 'state'; agent_id: string; state: SavedAgent['state'] } & Partial<ParkFields>)
+  | ({ event: 'session_facts' } & SessionFactSet)
+
+/** A report of display state. Each other report is a lifecycle report and goes out ahead of it. */
+export function isFacts(report: Report): boolean {
+  return report.event === 'session_facts'
+}
 
 export type Body = Report & {
   protocol: 1
@@ -152,6 +158,9 @@ export function collapse(queue: Report[], report: Report): Report[] {
       if (queued !== undefined && report.kind === 'presence') return queue
       return [...queue.filter((candidate) => candidate !== queued), report]
     }
+    case 'session_facts':
+      // The newest set stands for the session. It goes to the end, behind what was queued ahead of it.
+      return [...queue.filter((queued) => queued.event !== 'session_facts'), report]
   }
 }
 
@@ -178,6 +187,8 @@ function supersedes(queued: Report, report: Report): boolean {
     case 'activity':
       return queued.event === 'activity' && queued.agent_id === report.agent_id &&
         (queued.kind === 'prompt' || report.kind === 'presence')
+    case 'session_facts':
+      return queued.event === 'session_facts'
   }
 }
 

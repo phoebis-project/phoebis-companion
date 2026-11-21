@@ -8,7 +8,7 @@ has left so the model can pace its own work. The mod reports facts and holds no 
 to the router ([Keepalive](../router/keepalive.md)), and what a key's companion may do is a permission set on the key
 ([The key's permissions](../router/companion-mod.md#the-keys-permissions)).
 
-[Install and settings](install.md) covers installing the mod, its four settings and the variables they fall back to.
+[Install and settings](install.md) covers installing the mod, its settings and the variables they fall back to.
 [The start check](start-check.md) says what the mod asks the router at session start, and [The allowance
 tool](allowance-tool.md) what the model reads through the tool. [What the mod reports](reports.md) lists each report
 with the parks, the presence and the owner header, and [Development](development.md) says how to verify a checkout.

@@ -9,7 +9,13 @@ const QUERY = 'a URL with a query'
 const NOT_HTTP = 'an http or https URL with a host'
 const PREFIX = 'phoebis-companion: '
 
-type Options = { managementUrl: string; token: string; keepalive: boolean; notifications: boolean }
+type Options = {
+  managementUrl: string
+  token: string
+  keepalive: boolean
+  notifications: boolean
+  reportTitle: boolean
+}
 
 export type Settings = { url: string; key: string }
 
@@ -47,13 +53,14 @@ export function urlProblem(value: unknown): string | undefined {
   return url.href.startsWith(`${prefix}#`) ? FRAGMENT : NOT_HTTP
 }
 
-/** The four options as the manifest types them, a wrong type read as the default. */
+/** The options as the manifest types them, a wrong type read as the default. */
 export function optionsOf(options: PluginOptions): Options {
   return {
     managementUrl: typeof options.management_url === 'string' ? options.management_url : '',
     token: typeof options.token === 'string' ? options.token : '',
     keepalive: typeof options.keepalive === 'boolean' ? options.keepalive : true,
     notifications: typeof options.notifications === 'boolean' ? options.notifications : true,
+    reportTitle: typeof options.report_title === 'boolean' ? options.report_title : false,
   }
 }
 

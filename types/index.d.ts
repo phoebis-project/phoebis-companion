@@ -14,8 +14,19 @@ export type SavedAgent = {
   lastPresence: number
 }
 export type SavedCron = { id: string; wakeAt: number; recurring: boolean; expression?: string; createdAt: number }
+// The facts the mod last queued for the session, kept so that a read behind a reload sends a change alone, and so
+// that an option turned off clears what it sent.
+export type SessionFactSet = {
+  branch?: string
+  cwd?: string
+  project?: string
+  repository?: string
+  repository_root?: string
+  title?: string
+}
+// `factsOwed` stands while the router has not answered the last set queued for good, an empty set among them.
 export type SavedModel = { id: string; agents: SavedAgent[]; crons: SavedCron[]; released: string[];
-  routerReleased: string[] }
+  routerReleased: string[]; facts?: SessionFactSet; factsOwed?: true }
 declare module 'claude-code' {
   interface PluginState { 'phoebis-companion': { identity: Identity; model: SavedModel } }
 }

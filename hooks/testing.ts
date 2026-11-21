@@ -211,9 +211,11 @@ function response(reply: { status: number; body?: unknown }): HttpResponse {
 
 const EVENT_FIELDS: Record<string, { required: string[]; optional: string[] }> = {
   activity: { required: ['agent_id', 'kind'], optional: ['request_generation'] },
+  agent_facts: { required: ['agent_id'], optional: ['agent_type', 'description', 'name', 'request_generation'] },
   agent_start: { required: ['agent_id'], optional: ['request_generation'] },
   heartbeat: { required: [], optional: [] },
   session_end: { required: [], optional: [] },
+  session_facts: { required: [], optional: ['branch', 'cwd', 'project', 'repository', 'repository_root', 'title'] },
   session_start: { required: [], optional: ['owner_id', 'previous_instance_id'] },
   state: { required: ['agent_id', 'state'], optional: ['deadline', 'park_kind', 'request_generation', 'wake_at'] },
 }
@@ -253,6 +255,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   // The engine answers a stop event itself; under test the fake host stands in, so the mod's hook can pass it on.
   on('classic.Stop', async () => ({}))
   on('classic.SubagentStop', async () => ({}))
+  on('classic.SessionStart', async () => ({}))
+  on('classic.UserPromptSubmit', async () => ({}))
   let id = options.id ?? 'session-a'
   // The fields the fake builds for an agent, which cover what a hook reads. The client's AgentInfo gains required
   // fields between releases, so the list is cast once, where the fake answers agent.list.

@@ -1,11 +1,14 @@
 import type { AgentInfo, EngineInterface, HttpResponse, On, Timer } from 'claude-code'
-import type { Identity, SavedAgent, SavedModel, SavedTask } from '../types'
+import type { Identity, SavedAgent, SavedModel, SavedTask, SessionFactSet } from '../types'
+import { sameFacts, sessionFactSet } from './facts'
+import type { SessionRead } from './facts'
 import {
   agentOf,
   collapse,
   commandDeadline,
   earliest,
   heartbeatInterval,
+  isFacts,
   isParkKind,
   isRealPrompt,
   isRelease,
@@ -52,6 +55,9 @@ type SessionRecord = {
   // A start refused for a live holder told the person it waits, so the takeover that ends the wait is told once too.
   conflicted?: boolean
   heartbeatAt?: number
+  // An acknowledged registration leaves the duty to send the session's facts whole, since the router's record may be
+  // a new one. It stands until a session read that counts takes it.
+  factsDue: boolean
 }
 
 type Queue = {
@@ -59,6 +65,9 @@ type Queue = {
   inFlight?: { report: Report }
   attempt: number
   retryAt?: number
+  // A facts report that failed waits under a backoff of its own, so the lifecycle's reports go on meanwhile.
+  factsAttempt: number
+  factsRetryAt?: number
   // The agents whose start the router refused for its agent limit, each with its own retry time and attempt count:
   // their reports wait in order while the heartbeats and the other agents' reports go on.
   deferred: Map<string, { retryAt: number; attempt: number }>
@@ -80,6 +89,11 @@ type Model = {
   // The subagents this run released, until the client spawns one again or gives it a turn: a registration's answer
   // that still names one of them describes the run the release ends, so the client's list does not re-adopt it.
   released: Set<string>
+  // The session's set as last queued, whatever the router answered, so a set the router refused goes out again only
+  // once it changes or a registration is acknowledged.
+  factsQueued: SessionFactSet | undefined
+  // A set queued that the router has not answered for good, so a registration sends it again, an empty one too.
+  factsOwed: boolean
 }
 
 const ENDED = new Set(['completed', 'failed', 'killed'])
@@ -105,17 +119,27 @@ let bashBounds: { defaultMs?: number; maxMs?: number } = {}
 // The code of the registration's last refusal, while nothing else has been answered since.
 let startRefusal: unknown
 let session: SessionRecord | undefined
-const queue: Queue = { reports: [], attempt: 0, deferred: new Map() }
+const queue: Queue = { reports: [], attempt: 0, factsAttempt: 0, deferred: new Map() }
 let timer: Timer | undefined
 type RefusalHandler = (status: number, under: Settings) => void
 
 // The start hook holds the settings the allowance tool reads under, so it decides what a refusal does to them.
 let onRefused: RefusalHandler = () => undefined
+
+/** The fact groups the person switched on. Each is false in a default install. */
+export type FactOptions = { title: boolean }
+
+let factOptions: FactOptions = { title: false }
 // The tracked work as the host last took it, so a pump writes it only when it changed.
 let savedModel: string | undefined
 // The reports already sent again under a generation the router named, so a second refusal drops them.
 const resent = new WeakSet<Report>()
 const model: Model = freshModel()
+// The title the client last named for a session, with that session's id: a title counts only for its own session.
+let seenTitle: { id: string; title: string | undefined } | undefined
+// Counts the session reads, so a read that finishes behind a later one changes nothing.
+let factReads = 0
+let factReadsDone = 0
 
 // A start or a state of the agent's still queued carries a run the router takes after any answer that named the
 // agent released, so that answer no longer says the router ended what the mod holds.
@@ -181,6 +205,8 @@ function freshModel(): Model {
     turning: new Set(),
     current: new Set(),
     released: new Set(),
+    factsQueued: undefined,
+    factsOwed: false,
   }
 }
 
@@ -581,6 +607,8 @@ function snapshotModel(record: SessionRecord): SavedModel {
     crons: [...model.crons.values()].map((cron) => ({ ...cron })),
     released: [...model.released],
     routerReleased: [...record.routerReleased],
+    ...(model.factsQueued === undefined ? {} : { facts: { ...model.factsQueued } }),
+    ...(model.factsOwed ? { factsOwed: true as const } : {}),
   }
 }
 
@@ -594,6 +622,13 @@ function restoreModel(saved: SavedModel, sessionRecord: SessionRecord): void {
   model.crons = new Map(saved.crons.map((cron) => [cron.id, { ...cron }]))
   model.released = new Set(saved.released)
   sessionRecord.routerReleased = new Set(saved.routerReleased)
+  model.factsQueued = saved.facts
+  model.factsOwed = saved.factsOwed === true
+  // No title event fires again at a reload, so the saved title stands until the next one. An event that saw the
+  // session in this activation is newer than the save, also where it carried no title.
+  if (factOptions.title && saved.facts?.title !== undefined && seenTitle?.id !== saved.id) {
+    seenTitle = { id: saved.id, title: saved.facts.title }
+  }
   mainAgent()
 }
 
@@ -635,6 +670,7 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
     announced: new Set(),
     routerReleased: new Set(),
     stopped: false,
+    factsDue: false,
   }
   queue.reports = collapse([], startReport())
   queue.deferred = new Map()
@@ -643,15 +679,20 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
   if (held !== undefined) restoreModel(held, session)
 }
 
-// The first queued report that may go out now: one of an agent whose start the router refused for its limit waits
-// for that agent's retry time, so the agent's reports keep their order while everything else proceeds.
+// The first queued report that may go out now. A lifecycle report goes ahead of each facts report, wherever the two
+// stand in the queue, so a lease and an agent's run never wait for display state. A facts report waits for its own
+// retry time. A report of an agent whose start the router refused for its limit waits for that agent's retry time,
+// so the agent's reports keep their order while everything else proceeds.
 function nextReport(now: number): number {
-  return queue.reports.findIndex((report) => {
+  const waits = (report: Report): boolean => {
     const agent = agentOf(report)
-    if (agent === undefined) return true
-    const held = queue.deferred.get(agent)
-    return held === undefined || held.retryAt <= now
-  })
+    const held = agent === undefined ? undefined : queue.deferred.get(agent)
+    return held !== undefined && held.retryAt > now
+  }
+  const lifecycle = queue.reports.findIndex((report) => !isFacts(report) && !waits(report))
+  if (lifecycle >= 0) return lifecycle
+  if (queue.factsRetryAt !== undefined && now < queue.factsRetryAt) return -1
+  return queue.reports.findIndex((report) => isFacts(report) && !waits(report))
 }
 
 function ready(): { config: Settings; record: SessionRecord } | undefined {
@@ -722,6 +763,52 @@ export function emptyQueue(): void {
   queue.reports = []
 }
 
+// One read of the session's set. No hook awaits it.
+async function readSessionFacts($: EngineInterface): Promise<void> {
+  const held = reporting()
+  if (held === undefined) return
+  const { config, record } = held
+  const mine = ++factReads
+  const read: SessionRead = {}
+  if (factOptions.title && seenTitle?.id === record.id) read.title = seenTitle.title
+  const set = sessionFactSet(read)
+  // The read speaks for the reporting it started under. A clear, a resume, a session's end, a refused key or
+  // another URL or key since then means its result describes nothing the mod reports now.
+  const still = reporting()
+  if (still?.record !== record || still.config.url !== config.url || still.config.key !== config.key) return
+  // A later read that finished first holds the newer set.
+  if (mine < factReadsDone) return
+  factReadsDone = mine
+  // An acknowledged registration leaves the duty to send the set whole, since the router's record may be a new
+  // one. The first read that counts takes it, and a read that finds nothing to send has done it.
+  const whole = record.factsDue
+  record.factsDue = false
+  const queued = model.factsQueued
+  const holds = Object.keys(set).length > 0 || Object.keys(queued ?? {}).length > 0 || model.factsOwed
+  if (whole ? !holds : sameFacts(set, queued)) return
+  queue.reports = collapse(queue.reports, { event: 'session_facts', ...set })
+  model.factsQueued = set
+  model.factsOwed = true
+  void pump($)
+}
+
+// The router answered a facts report for good, with an acknowledgment or with a refusal that drops it. Where the
+// report is the last set queued, nothing is owed any more. The answer to an older report leaves the newer one owed.
+function factsSettled(report: Report): void {
+  if (report.event !== 'session_facts') return
+  const { event: _event, ...set } = report
+  if (sameFacts(set, model.factsQueued)) model.factsOwed = false
+}
+
+// Keeps the title an event names with its session's id. An event of the session without a string title leaves the
+// title empty, so the next read sends the set without it.
+function noteTitle(e: unknown): void {
+  const id = field(e, 'session_id')
+  if (typeof id !== 'string') return
+  const title = field(e, 'session_title')
+  seenTitle = { id, title: typeof title === 'string' ? title : undefined }
+}
+
 type AnsweredAgent = { agent_id: string; state: unknown; request_generation?: number; park?: Park }
 
 type Answer = {
@@ -784,7 +871,9 @@ function settle($: EngineInterface, config: Settings, record: SessionRecord, rep
   }
   if (response === undefined || response.status === 429 || response.status >= 500) {
     queue.reports = restore(queue.reports, report)
-    delay($, now)
+    // A facts report waits under a backoff of its own, so the lifecycle's reports go on meanwhile.
+    if (isFacts(report)) delayFacts($, now)
+    else delay($, now)
     return
   }
   if (response.ok) {
@@ -812,12 +901,19 @@ function settle($: EngineInterface, config: Settings, record: SessionRecord, rep
   const named = code !== undefined && CODE.test(code) ? `with code ${code}` : 'with no code'
   say($, `the router answered status ${response.status} ${named} to the ${report.event} report, so the mod drops it`,
     { to: 'debug' })
+  factsSettled(report)
 }
 
 function delay($: EngineInterface, now: number): void {
   queue.retryAt = now + backoff(queue.attempt)
   queue.attempt += 1
   $.clock.after(queue.retryAt - now, () => void pump($))
+}
+
+function delayFacts($: EngineInterface, now: number): void {
+  queue.factsRetryAt = now + backoff(queue.factsAttempt)
+  queue.factsAttempt += 1
+  $.clock.after(queue.factsRetryAt - now, () => void pump($))
 }
 
 function deferAgent($: EngineInterface, agent: string, now: number): void {
@@ -868,10 +964,21 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
     }
     record.conflicted = undefined
   }
-  queue.attempt = 0
-  queue.retryAt = undefined
+  // An acknowledgment resets the backoff of the kind it answers and leaves the other's.
+  if (isFacts(report)) {
+    queue.factsAttempt = 0
+    queue.factsRetryAt = undefined
+    factsSettled(report)
+  } else {
+    queue.attempt = 0
+    queue.retryAt = undefined
+  }
   // An answer without the member says nothing about the router's agents, so nothing is reconciled against it.
   if (report.event === 'session_start' && ack.agents !== undefined) reconcileAck(ack.agents, listed)
+  if (report.event === 'session_start') {
+    record.factsDue = true
+    void readSessionFacts($)
+  }
 }
 
 function refusedReport($: EngineInterface, record: SessionRecord, report: Report, refusal: Answer, now: number,
@@ -1102,8 +1209,9 @@ export function clearSettings(): void {
   settings = undefined
 }
 
-export function installKeepalive(on: On, refused: RefusalHandler): void {
+export function installKeepalive(on: On, refused: RefusalHandler, facts: FactOptions): void {
   onRefused = refused
+  factOptions = facts
   on('prompt.submit', async ($, e, next) => {
     if (!active()) return next(e)
     await ensureSession($, () => true)
@@ -1127,6 +1235,7 @@ export function installKeepalive(on: On, refused: RefusalHandler): void {
       dropCommands(main, (task) => !keep.has(task.id))
       void pump($)
     }
+    if (live() && session === record) void readSessionFacts($)
     return r
   }).catch(($, e, next) => next(e))
 
@@ -1200,6 +1309,7 @@ export function installKeepalive(on: On, refused: RefusalHandler): void {
         model.turning.delete(MAIN)
         model.current.clear()
         rest(mainAgent())
+        void readSessionFacts($)
       } else {
         await turnEnded($, e.agentId)
       }
@@ -1219,6 +1329,19 @@ export function installKeepalive(on: On, refused: RefusalHandler): void {
     tasksStopped($, e)
     return next(e)
   }).catch(($, e, next) => next(e))
+
+  if (factOptions.title) {
+    // The title rides these two events and no other. Nothing but the title and the session id is read, so a prompt's
+    // text stays unread, and each event is passed on unchanged.
+    on('classic.SessionStart', async (_$, e, next) => {
+      noteTitle(e)
+      return next(e)
+    }).catch((_$, e, next) => next(e))
+    on('classic.UserPromptSubmit', async (_$, e, next) => {
+      noteTitle(e)
+      return next(e)
+    }).catch((_$, e, next) => next(e))
+  }
 
   // The end goes out past a request in flight: every session.end hook shares one short budget, and the lease
   // covers whatever this one request does not reach.

@@ -2,15 +2,17 @@
 
 The mod reports on main, the session's own agent, and on each subagent the client lists. Each agent has an open set: the
 background commands and the subagents it started that have not ended yet. The session's crons and wakeups belong to
-main. Every report is one request to the router's keepalive route, and the route, the six events with their fields, the
-acknowledgment, the refusal codes and how the mod queues, sends and retries are on [The
+main. Every report is one request to the router's keepalive route, and the route, the seven events with their fields,
+the acknowledgment, the refusal codes and how the mod queues, sends and retries are on [The
 relay](../router/relay.md#the-keepalive-protocol).
 
 | Mod event | Fact | Report |
 | --- | --- | --- |
 | `session.start` | the process is up | the owner fence, then `session_start` |
+| `classic.SessionStart` | the session's custom title, with Session title reports on | none of its own: the mod keeps the title for the next read |
 | `prompt.submit` from `bridge`, `composer`, `sdk` or `slack-ping` | a real prompt | `activity` kind `prompt` for main |
 | `prompt.submit` from `scheduled-trigger` | a cron or a wakeup fired | it leaves the crons or moves to its next fire |
+| `classic.UserPromptSubmit` | the session's custom title, with Session title reports on | the same |
 | `prompt.edit` | the person is typing | `activity` kind `presence` for main, at most once a minute |
 | `turn.step` | a model request of main or a subagent | `state busy` when the agent was not busy |
 | `tool.call` before the tool runs | a tool runs | `state busy` when the agent was not busy |
@@ -22,6 +24,7 @@ relay](../router/relay.md#the-keepalive-protocol).
 | `classic.SubagentStop` | a subagent's turn ended, with the background list | the same |
 | `turn.complete` of a subagent | the subagent's turn ended | `state parked` on its open set, or `state released` |
 | `turn.complete` of main | main's turn ended | `state idle`, or `state parked` with its park |
+| an acknowledged `session_start`, a `prompt.submit` and a `turn.complete` of main | the session's facts are read | `session_facts` where the set changed, and after each registration where the set, the last set sent or a set the router did not confirm holds a fact |
 | `session.end` | the session ends or changes id | `session_end`, one request |
 | the heartbeat timer | time passed | the session id check, the reconcile, then `heartbeat` |
 
@@ -105,6 +108,29 @@ how long the cache stays warm for it.
 most once a minute. The router resets main's idle clock on a presence and does nothing else with it, so no agent turns
 busy and no state changes.
 
+## Reported facts
+
+With Session title reports on ([Configure](install.md#configure)), the mod reports the session's custom title, the one
+a `/rename` gave it, in a `session_facts` report. The title rides `classic.SessionStart` and `classic.UserPromptSubmit`,
+and the mod reads the session's facts when the router acknowledges a `session_start`, at each prompt and at the end of
+each of main's turns. A title counts only for the session id its event names, so a title seen before a `/clear` never
+goes out under the new id. In a default install a session reports no fact.
+
+A `session_facts` report states the whole set, so a fact that is gone is left out of the next report and the router
+clears it. The mod sends the set where it changed, and after each acknowledged registration where the set, the last set
+sent or a set the router did not confirm holds a fact, since the router's record may be a new one. The mod cleans each
+value before it sends it: each run of line breaks and tabs folds to one space, control characters, format characters
+and unpaired surrogates go, the ends are trimmed, and a title past 256 bytes is cut on a whole character. The router
+applies the same rules, and [the event's members](../router/relay.md#the-keepalive-protocol) are on The relay.
+
+A facts report goes out behind each lifecycle report in the queue and waits under a backoff of its own, so a report the
+router refuses or cannot take costs the facts alone and never a heartbeat. A fact the person withdrew, by turning the
+option off, stays owed until the router confirms the report that clears it. Each registration until then sends that
+report again, also after a reload of the mod, since the mod keeps the last set it sent and the owed mark in the plugin's
+host state beside its tracked work. A router that does not know `session_facts` refuses each facts report with status
+400, and the mod drops it with one debug line and sends the set again only once it changes or the router acknowledges a
+registration.
+
 ## The owner header
 
 At session start the mod fences the process: it mints two v4 uuids, the owner id and the instance id, and writes one
@@ -140,7 +166,8 @@ router's page [The companion mod](../router/companion-mod.md), under "An owner m
 ## What the mod leaves alone
 
 The mod runs one shell command at load, `echo $PPID`, to read the client process's identity, and no other. It hooks two
-settings-hook events, `classic.Stop` and `classic.SubagentStop`, for the background list they carry, and reads no
-transcript, no background command's output and no conversation text. It reads no file. It keeps the key `identities` in
-its own store, which Claude Code holds as a file under the user's configuration directory, and its four settings live
-where Claude Code keeps a plugin's configuration, the Router key in its secure storage.
+settings-hook events, `classic.Stop` and `classic.SubagentStop`, for the background list they carry. With Session title
+reports on it also hooks `classic.SessionStart` and `classic.UserPromptSubmit` and reads their title member alone, never
+a prompt's text. It reads no transcript, no background command's output and no conversation text. It reads no file. It
+keeps the key `identities` in its own store, which Claude Code holds as a file under the user's configuration
+directory, and its settings live where Claude Code keeps a plugin's configuration, the Router key in its secure storage.
