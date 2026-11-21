@@ -906,6 +906,29 @@ test('a run that ends while the earlier run\'s release is out sends its set ahea
     }])
   })
 
+test('a run that ends while its start is out sends its set while another facts report waits for its retry',
+  { options: { management_url: ROUTER_URL, report_agents: true, report_title: true } }, async ($, on) => {
+    const { clock, router } = host(on)
+    router.answer((_body, ack) => ok(ack))
+    router.answer(() => ({ status: 503 }))
+    // The start's answer lands half a second in, while the title waits for its retry a second behind its failure.
+    router.answer(async (_body, ack) => {
+      await clock.sleep(500)
+      return ok(ack)
+    })
+    await titled($, clock, 'SessionStart', 'session-a', 'Checkout retry')
+    await start($, clock)
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await spawn($, clock, REVIEWER)
+    router.setAgents([])
+    await complete($, clock, 'worker-1')
+    await clock.advance(500)
+    // The set's acknowledgment resets the facts backoff, so the title goes again behind the release.
+    expect(events(router)).toEqual([
+      'session_start', 'session_facts', 'agent_start', 'agent_facts', 'state', 'session_facts',
+    ])
+  })
+
 test('a failed facts report of a run that ended early is passed by its release', AGENTS, async ($, on) => {
   const { clock, router } = host(on)
   router.answer((_body, ack) => ok(ack))
