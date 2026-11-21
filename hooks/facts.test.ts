@@ -405,6 +405,10 @@ test('a remote leaves as host and path, and one the rule cannot read does not le
     ['C:/work/storefront', undefined],
     ['ssh://git@[2001:db8::1:2222/acme/storefront.git', undefined],
     ['https://Git.\u00C9xample/acme/storefront.git', 'git.\u00C9xample/acme/storefront'],
+    ['https://git.example/acme/storefront.git#f', 'git.example/acme/storefront'],
+    ['git@git.example:Acme/Storefront.git', 'git.example/Acme/Storefront'],
+    ['https://git.example/acme/store front.git', undefined],
+    ['https://git.example/acme\\storefront.git', undefined],
   ]
   for (const [at, [remote]] of rows.entries()) {
     const root = `/home/dev/work/r${at}`
