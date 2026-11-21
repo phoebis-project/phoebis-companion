@@ -13,6 +13,7 @@ const LONG_CAP = 1024
 const FOLDED = /[\u0009-\u000D\u0085\u{2028}\u{2029}]+/gu
 // Under the `u` flag `\p{Cs}` matches an unpaired surrogate alone. The router's decoder refuses a whole body for one.
 const REMOVED = /[\p{Cc}\p{Cf}\p{Cs}]/gu
+const UTF8 = new TextEncoder()
 
 /** What the session read gathered, each member as its source gave it. */
 export type SessionRead = { branch?: unknown; cwd?: unknown; project?: unknown; remote?: unknown;
@@ -28,21 +29,17 @@ function cleaned(value: unknown): string | undefined {
   return text === '' ? undefined : text
 }
 
-/** The value's length in bytes of UTF-8, each code point counted as 1, 2, 3 or 4 by its value. */
+/** The value's length in bytes of UTF-8. */
 function bytesOf(value: string): number {
-  let bytes = 0
-  for (const point of value) {
-    const code = point.codePointAt(0) as number
-    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4
-  }
-  return bytes
+  return UTF8.encode(value).length
 }
 
 /**
  * The longest prefix of whole code points within `cap` bytes, trimmed at its end again, so a cut never leaves half of
  * a surrogate pair.
  */
-function cutTo(value: string, cap: number): string {
+function cutTo(value: string | undefined, cap: number): string | undefined {
+  if (value === undefined) return undefined
   let bytes = 0
   let end = 0
   for (const point of value) {
@@ -91,9 +88,6 @@ function reduced(remote: string): string | undefined {
     const end = after.search(/[/?#]/)
     const authority = end < 0 ? after : after.slice(0, end)
     path = end < 0 ? '' : after.slice(end)
-    // A raw `/`, `?` or `#` in a credential ends the authority early, and the cuts below can then remove each sign of
-    // it, so an `@` behind the authority's end leaves the user information unreadable.
-    if (path.includes('@')) return undefined
     host = authority.slice(authority.lastIndexOf('@') + 1).replace(/:\d*$/, '')
   } else {
     const { colon } = headOf(remote)
@@ -102,9 +96,12 @@ function reduced(remote: string): string | undefined {
     // One letter ahead of the colon is a Windows drive.
     if (/^[A-Za-z]$/.test(left)) return undefined
     path = remote.slice(colon + 1)
-    if (path.includes('@')) return undefined
     host = left.slice(left.lastIndexOf('@') + 1)
   }
+  // A raw `/`, `?` or `#` in a URL's credential ends the authority early, as a raw `:` in the `scp` form's ends the
+  // host, and the cuts below can then remove each sign of it, so an `@` behind that end leaves the user information
+  // unreadable.
+  if (path.includes('@')) return undefined
   const cut = path.search(/[?#]/)
   path = (cut < 0 ? path : path.slice(0, cut)).replace(/^\/+/, '').replace(/\/+$/, '')
   // One `.git` alone goes, so a repository named `tools.git` keeps its name.
@@ -125,35 +122,31 @@ function within(value: string | undefined, cap: number): string | undefined {
   return value !== undefined && bytesOf(value) <= cap ? value : undefined
 }
 
+// The callers count a set's keys, so a member with no value stays out rather than holding `undefined`.
+function put<K extends string>(set: { [P in K]?: string }, key: K, value: string | undefined): void {
+  if (value !== undefined) set[key] = value
+}
+
 /** The session's set: each member cleaned and capped, and a member with no value left out. */
 export function sessionFactSet(read: SessionRead): SessionFactSet {
   const set: SessionFactSet = {}
-  const branch = within(cleaned(read.branch), SHORT_CAP)
-  if (branch !== undefined) set.branch = branch
-  const cwd = within(cleaned(read.cwd), LONG_CAP)
-  if (cwd !== undefined) set.cwd = cwd
-  const project = within(cleaned(read.project), LONG_CAP)
-  if (project !== undefined) set.project = project
+  put(set, 'branch', within(cleaned(read.branch), SHORT_CAP))
+  put(set, 'cwd', within(cleaned(read.cwd), LONG_CAP))
+  put(set, 'project', within(cleaned(read.project), LONG_CAP))
   const remote = cleaned(read.remote)
   // The cap counts the reduced value, so a long remote with a short result is kept.
-  const repository = within(remote === undefined ? undefined : reduced(remote), LONG_CAP)
-  if (repository !== undefined) set.repository = repository
-  const root = within(cleaned(read.repositoryRoot), LONG_CAP)
-  if (root !== undefined) set.repository_root = root
-  const title = cleaned(read.title)
-  if (title !== undefined) set.title = cutTo(title, SHORT_CAP)
+  put(set, 'repository', within(remote === undefined ? undefined : reduced(remote), LONG_CAP))
+  put(set, 'repository_root', within(cleaned(read.repositoryRoot), LONG_CAP))
+  put(set, 'title', cutTo(cleaned(read.title), SHORT_CAP))
   return set
 }
 
 /** An agent's set from a spawn call or a list row: each member cleaned and capped, one with no value left out. */
 export function agentFactSet(read: { description?: unknown; name?: unknown; type?: unknown }): AgentFactSet {
   const set: AgentFactSet = {}
-  const type = within(cleaned(read.type), SHORT_CAP)
-  if (type !== undefined) set.agent_type = type
-  const description = cleaned(read.description)
-  if (description !== undefined) set.description = cutTo(description, SHORT_CAP)
-  const name = cleaned(read.name)
-  if (name !== undefined) set.name = cutTo(name, SHORT_CAP)
+  put(set, 'agent_type', within(cleaned(read.type), SHORT_CAP))
+  put(set, 'description', cutTo(cleaned(read.description), SHORT_CAP))
+  put(set, 'name', cutTo(cleaned(read.name), SHORT_CAP))
   return set
 }
 

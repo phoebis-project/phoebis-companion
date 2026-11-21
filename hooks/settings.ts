@@ -9,14 +9,15 @@ const QUERY = 'a URL with a query'
 const NOT_HTTP = 'an http or https URL with a host'
 const PREFIX = 'phoebis-companion: '
 
+/** The fact groups the person switched on. Each is false in a default install. */
+export type FactOptions = { agents: boolean; project: boolean; title: boolean }
+
 type Options = {
   managementUrl: string
   token: string
   keepalive: boolean
   notifications: boolean
-  reportAgents: boolean
-  reportProject: boolean
-  reportTitle: boolean
+  facts: FactOptions
 }
 
 export type Settings = { url: string; key: string }
@@ -55,16 +56,22 @@ export function urlProblem(value: unknown): string | undefined {
   return url.href.startsWith(`${prefix}#`) ? FRAGMENT : NOT_HTTP
 }
 
+function flag(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
 /** The options as the manifest types them, a wrong type read as the default. */
 export function optionsOf(options: PluginOptions): Options {
   return {
     managementUrl: typeof options.management_url === 'string' ? options.management_url : '',
     token: typeof options.token === 'string' ? options.token : '',
-    keepalive: typeof options.keepalive === 'boolean' ? options.keepalive : true,
-    notifications: typeof options.notifications === 'boolean' ? options.notifications : true,
-    reportAgents: typeof options.report_agents === 'boolean' ? options.report_agents : false,
-    reportProject: typeof options.report_project === 'boolean' ? options.report_project : false,
-    reportTitle: typeof options.report_title === 'boolean' ? options.report_title : false,
+    keepalive: flag(options.keepalive, true),
+    notifications: flag(options.notifications, true),
+    facts: {
+      agents: flag(options.report_agents, false),
+      project: flag(options.report_project, false),
+      title: flag(options.report_title, false),
+    },
   }
 }
 

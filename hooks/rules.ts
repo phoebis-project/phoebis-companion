@@ -166,11 +166,10 @@ export function collapse(queue: Report[], report: Report): Report[] {
       return [...queue.filter((candidate) => candidate !== queued), report]
     }
     case 'session_facts':
-      // The newest set stands for the session. It goes to the end, behind what was queued ahead of it.
-      return [...queue.filter((queued) => queued.event !== 'session_facts'), report]
     case 'agent_facts':
-      // The newest set stands for the agent, at the end, so it stays behind the agent's start.
-      return [...queue.filter((queued) => !sameAgent(queued, 'agent_facts', report.agent_id)), report]
+      // The newest set stands for the session or the agent. It goes to the end, so it stays behind what was queued
+      // ahead of it, an agent's start among them.
+      return [...queue.filter((queued) => !supersedes(queued, report)), report]
   }
 }
 
@@ -186,10 +185,12 @@ function supersedes(queued: Report, report: Report): boolean {
   switch (report.event) {
     case 'session_start':
     case 'heartbeat':
+    case 'session_facts':
       return queued.event === report.event
     case 'session_end':
       return false
     case 'agent_start':
+    case 'agent_facts':
       return sameAgent(queued, report.event, report.agent_id)
     case 'state':
       // A release refused once goes out again even behind the agent's next state.
@@ -197,10 +198,6 @@ function supersedes(queued: Report, report: Report): boolean {
     case 'activity':
       return queued.event === 'activity' && queued.agent_id === report.agent_id &&
         (queued.kind === 'prompt' || report.kind === 'presence')
-    case 'session_facts':
-      return queued.event === 'session_facts'
-    case 'agent_facts':
-      return sameAgent(queued, 'agent_facts', report.agent_id)
   }
 }
 
