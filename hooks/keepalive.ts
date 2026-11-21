@@ -141,8 +141,9 @@ const resent = new WeakSet<Report>()
 // The set of a run that ended before the router acknowledged its start, by the queued release that ends the run, so
 // that acknowledgment puts it right ahead of that release. A later run of the agent ends under a release of its own.
 const closingSets = new WeakMap<Report, AgentFactSet>()
-// The closing sets sent once, each of which had its one try.
-const closingTried = new WeakSet<Report>()
+// The agents' sets sent once. A set that failed as an ordinary one stands at the queue's head, where its agent's
+// release can queue right behind it, so it counts as tried as a closing set does.
+const agentFactsTried = new WeakSet<Report>()
 const model: Model = freshModel()
 // The title the client last named for a session, with that session's id: a title counts only for its own session.
 let seenTitle: { id: string; title: string | undefined } | undefined
@@ -790,9 +791,9 @@ function nextReport(now: number): number {
   }
   const factsWait = waiting(queue.facts, now)
   // A closing set's one try comes whatever another facts report's retry time, since the release behind it ends
-  // what it describes. One that failed waits under the facts backoff, so the release passes it.
+  // what it describes. A set sent once already waits under the facts backoff, so the release passes it.
   const first = reports.findIndex((report, at) => !waits(report) &&
-    (!isFacts(report) || (closingAt(reports, at) && (!factsWait || !closingTried.has(report)))))
+    (!isFacts(report) || (closingAt(reports, at) && (!factsWait || !agentFactsTried.has(report)))))
   if (first >= 0 || factsWait) return first
   // An agent's facts go out only once the router acknowledged the agent on this registration, so a report restored
   // behind a new registration waits for its agent's start as a new one does.
@@ -817,8 +818,8 @@ async function pump($: EngineInterface): Promise<void> {
     // A session.start can replace or clear the settings while the request is out, so the catch reads the key this
     // request carried from here and cannot throw on a cleared one.
     const { config, record } = held
-    if (closingAt(queue.reports, at)) closingTried.add(queue.reports[at] as Report)
     const [report] = queue.reports.splice(at, 1) as [Report]
+    if (report.event === 'agent_facts') agentFactsTried.add(report)
     queue.inFlight = { report }
     const body = buildBody(record, report, sentAt)
     let response: HttpResponse | undefined

@@ -1064,6 +1064,24 @@ test('a failed facts report of a run that ended early is passed by its release',
   expect(events(router)).toEqual(['session_start', 'agent_start', 'agent_facts', 'state'])
 })
 
+test('a changed set of an announced agent that failed waits out its retry time while its release passes it', AGENTS,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    // The registration, the start, the spawn's set and the heartbeat, then the changed set the tick sends.
+    for (let request = 0; request < 4; request += 1) router.answer((_body, ack) => ok(ack))
+    router.answer(() => ({ status: 503 }))
+    await start($, clock)
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await spawn($, clock, REVIEWER)
+    router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW, description: 'Review the export job' }])
+    await clock.advance(25000)
+    // The failed set stands at the queue's head, and the agent's release queues right behind it, a second ahead of
+    // the set's retry time.
+    router.setAgents([])
+    await complete($, clock, 'worker-1')
+    expect(events(router)).toEqual(['session_start', 'agent_start', 'agent_facts', 'heartbeat', 'agent_facts', 'state'])
+  })
+
 test('spawn facts for an agent its own step announced first go out as a changed set', AGENTS, async ($, on) => {
   const { clock, router } = host(on)
   router.setAgents([{ id: 'worker-1', status: 'running', type: 'code-reviewer' }])
