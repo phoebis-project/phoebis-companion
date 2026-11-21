@@ -192,6 +192,11 @@ export type FakeRouter = {
    */
   denyEnvSet: (reason: string) => void
   /**
+   * Denies the next `$.state.set` of the plugin's identity with the reason, as a host whose hook on the write refuses
+   * it, which rejects the call.
+   */
+  denyIdentityWrite: (reason: string) => void
+  /**
    * Denies the next `$.state.set` of the plugin's tracked work with the reason, as a host whose hook on the write
    * refuses it, which rejects the call.
    */
@@ -317,6 +322,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const edits: (() => PromptEditResult)[] = []
   const submits: (() => PromptSubmitResult | Promise<PromptSubmitResult>)[] = []
   const envSetDenials: string[] = []
+  const identityWriteDenials: string[] = []
   const modelWriteDenials: string[] = []
   const registerDenials: string[] = []
   let envSetDelayMs = 0
@@ -420,6 +426,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     denyEnvSet: (reason) => {
       envSetDenials.push(reason)
+    },
+    denyIdentityWrite: (reason) => {
+      identityWriteDenials.push(reason)
     },
     denyModelWrite: (reason) => {
       modelWriteDenials.push(reason)
@@ -577,6 +586,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
       modelWriteDelayMs = 0
       return clock.sleep(ms).then(write)
     }
+    const denial = identityWriteDenials.shift()
+    if (denial !== undefined) return { deny: denial }
     identities.set(id, e.value as Identity)
     stateVersion += 1
     router.state = e.value as Identity

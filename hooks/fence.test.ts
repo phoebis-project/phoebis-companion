@@ -231,6 +231,30 @@ test('a reload under a later session id of the same process reuses the pair the 
     keptInStore(router, PROCESS)
   })
 
+test('a start after a clear in the same process keeps the pair once the store\'s list no longer holds the process',
+  CONFIGURED, async ($, on) => {
+    mock.env(on, INHERITED)
+    const clock = mock.clock(on, { now: RELOAD_AT })
+    const router = fakeRouter(on, clock, { id: 'session-a', state: HELD, process: PROCESS,
+      store: { identities: [[PROCESS, HELD]] } })
+    await start($, clock)
+    // A clear raises no start, so the prompt is what moves the mod to the new id.
+    router.setId('session-b')
+    await prompt($, clock)
+    // The fences of eight later processes push this one out of the store's list.
+    router.store.set('identities', Array.from({ length: 8 }, (_, at) =>
+      [String(1000001 + at), { instance: `i-${at}`, owner: `u-${at}` }]))
+    // The fence picks its pair from the host's state, the two variables, the store and the process id, and a reload
+    // reads each of them again to the same value, so a second start in the load decides as a reload does.
+    await start($, clock)
+    expect(router.envWrites).toEqual([
+      { name: HEADERS, value: 'X-B: 2\nX-Keepalive-Owner-Id: u-old' },
+      { name: INSTANCE, value: 'i-1' },
+      { name: HEADERS, value: 'X-B: 2\nX-Keepalive-Owner-Id: u-old' },
+      { name: INSTANCE, value: 'i-1' },
+    ])
+  })
+
 test('a start replaced while its fence reads writes none of its identity', CONFIGURED, async ($, on) => {
   const { clock, router } = processHost(on, { ANTHROPIC_AUTH_TOKEN: KEY }, { process: PROCESS })
   // The first start's read of the stored pairs answers a second late, and a second start runs to its end meanwhile.
@@ -284,6 +308,26 @@ test('a fence whose write the host refuses leaves the next start\'s fence to run
     { name: INSTANCE, value: registration.instance_id },
   ])
 })
+
+test('a state write the host refuses when a prompt adopts a new id leaves the next start\'s fence to run', CONFIGURED,
+  async ($, on) => {
+    mock.env(on, INHERITED)
+    const clock = mock.clock(on, { now: RELOAD_AT })
+    const router = fakeRouter(on, clock, { id: 'session-a', state: HELD, process: PROCESS,
+      store: { identities: [[PROCESS, HELD]] } })
+    await start($, clock)
+    router.setId('session-b')
+    // The host refuses the write that keeps the pair under the id the prompt adopts.
+    router.denyIdentityWrite('another hook refuses the write')
+    await prompt($, clock)
+    await start($, clock)
+    expect(router.envWrites).toEqual([
+      { name: HEADERS, value: 'X-B: 2\nX-Keepalive-Owner-Id: u-old' },
+      { name: INSTANCE, value: 'i-1' },
+      { name: HEADERS, value: 'X-B: 2\nX-Keepalive-Owner-Id: u-old' },
+      { name: INSTANCE, value: 'i-1' },
+    ])
+  })
 
 test('a child process mints its own pair beside the one the store keeps for its parent', CONFIGURED,
   async ($, on) => {

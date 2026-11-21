@@ -162,16 +162,18 @@ session id. The mod keeps the instance id in `PHOEBIS_KEEPALIVE_INSTANCE`. Every
 `session_start` names the owner as `owner_id`, which no other report carries. A `/clear` or a `/resume` keeps both ids,
 since the owner is the process.
 
-Claude Code holds the pair in the plugin's own state for the session, and that state survives a hot reload of the
-module. The mod also keeps the pair in the plugin's store under the key `identities`, beside the identity of the client
-process it was minted in, for the newest eight processes. The store outlives the session, so a reload after a `/clear`
-or a `/resume`, under either id, finds the pair there when the session's state holds none. A reload reuses the pair
-while the two variables still name it, so the owner line and the instance stay, and the router's session keeps its
-owner. A child process inherits the two variables but runs as another process, for which the store holds no pair, so it
-mints its own pair and registers as its own instance. Where Claude Code cannot run the command that reads the process's
-identity, a reload after a `/clear` mints a new pair. A child process that never runs the fence keeps the parent's owner
-line: one on a client that does not load the mod ([Install](install.md#install)), one with the mod disabled, or one
-without a URL or a key. That line matters only for a child that sends the parent's session id.
+Claude Code holds the plugin's own state per session, and that state survives a hot reload of the module. The mod keeps
+the pair in that state under each session id it adopts: at session start, and at the first prompt after a `/clear` or a
+`/resume` moves the process to another id. The mod also keeps the pair in the plugin's store under the key `identities`,
+beside the identity of the client process it was minted in, for the newest eight processes. The store outlives the
+session, so a reload that comes before the first prompt under a new id finds the pair there while the store's list still
+holds the process. A reload reuses the pair while the two variables still name it, so the owner line and the instance
+stay, and the router's session keeps its owner. A child process inherits the two variables but runs as another process,
+for which the store holds no pair, so it mints its own pair and registers as its own instance. Where Claude Code cannot
+run the command that reads the process's identity, a reload that comes before the first prompt under a new id mints a
+new pair. A child process that never runs the fence keeps the parent's owner line: one on a client that does not load
+the mod ([Install](install.md#install)), one with the mod disabled, or one without a URL or a key. That line matters
+only for a child that sends the parent's session id.
 
 A `session_start` the router refuses with a bare `instance_conflict`, since another instance holds the session under a
 live lease, leaves the session live. The mod writes one line to the transcript, `phoebis-companion: another instance

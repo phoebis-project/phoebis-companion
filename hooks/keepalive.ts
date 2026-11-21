@@ -732,6 +732,22 @@ async function persistModel($: EngineInterface): Promise<void> {
   await run
 }
 
+// The host keeps its state per session, and a clear or a resume raises no start, so no fence writes the pair under an
+// id the process adopts at a prompt. Held there, it serves a reload under that id once the store's list no longer
+// holds the process. The step waits its turn behind the fence's writes, so it never lands inside them, and guarded
+// keeps a refused call from stalling the chain or reaching the caller.
+function keepIdentity($: EngineInterface, isCurrent: () => boolean): void {
+  fenceWrites = fenceWrites.then(() => guarded(async () => {
+    const { value: held } = await $.state.get(IDENTITY_REF)
+    // Taken behind the read, so the pair a start assigned meanwhile is the one written.
+    const pair = identity
+    if (pair === undefined || (held !== undefined && held.instance === pair.instance && held.owner === pair.owner)) {
+      return
+    }
+    if (isCurrent()) await $.state.set(IDENTITY_REF, pair)
+  }))
+}
+
 /** Answers whether a transition of another session overtook this caller's, so its session is one the host left. */
 async function ensureSession($: EngineInterface, isCurrent: () => boolean): Promise<boolean> {
   const id = await $.session.id()
@@ -767,6 +783,7 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
   savedModel = undefined
   Object.assign(model, freshModel())
   if (held !== undefined) restoreModel(held, session)
+  keepIdentity($, isCurrent)
   return false
 }
 
@@ -1356,8 +1373,8 @@ async function fence($: EngineInterface, isCurrent: () => boolean): Promise<Iden
   if (held !== undefined && reusable(held, variable, owner)) {
     pair = held
   } else {
-    // The host's state belongs to the session, so after a clear it holds nothing under the new id, and the store's
-    // entry for this process is what still shows the pair was minted here.
+    // The host's state belongs to the session, so after a clear it holds nothing under the new id until the first
+    // prompt there, and the store's entry for this process is what still shows the pair was minted here.
     const stored = pairs.find(([id]) => id === processId)?.[1]
     pair = stored !== undefined && reusable(stored, variable, owner)
       ? stored
