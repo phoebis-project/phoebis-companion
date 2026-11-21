@@ -129,10 +129,10 @@ place. A path or a reduced repository over 1,024 bytes and a branch over 256 byt
 
 A `session_facts` report states the whole set, so a fact that is gone is left out of the next report and the router
 clears it. The mod sends the set where it changed, and after each acknowledged registration where the set or the last
-set sent holds a fact or where a report the router did not confirm is still owed, a clear among them, since the
-router's record may be a new one. The mod cleans each value before it sends it: each run of line breaks and tabs folds
-to one space, control characters, format characters and unpaired surrogates go, the ends are trimmed, and a title past
-256 bytes is cut on a whole character. The router applies the same rules, and [the event's
+set sent holds a fact or where a report the router did not confirm is still owed, a clear among them, since the router's
+record may be a new one. The mod cleans each value before it sends it: each run of line breaks and tabs folds to one
+space, control characters, format characters and unpaired surrogates go, the ends are trimmed, and a title past 256
+bytes is cut on a whole character. The router applies the same rules, and [the event's
 members](../router/relay.md#the-keepalive-protocol) are on The relay.
 
 A facts report goes out behind each lifecycle report in the queue and waits under a backoff of its own, so a report the
