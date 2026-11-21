@@ -58,9 +58,6 @@ type SessionRecord = {
   // An acknowledged registration leaves the duty to send the session's facts whole, since the router's record may be
   // a new one. It stands until a session read that counts takes it.
   factsDue: boolean
-  // The set of a run that ended before the router acknowledged its start, kept for that acknowledgment, which puts
-  // it right ahead of the run's release.
-  lastFacts: Map<string, AgentFactSet>
 }
 
 type Backoff = { attempt: number; retryAt?: number }
@@ -137,6 +134,9 @@ let savedModel: string | undefined
 let modelWrites: Promise<unknown> = Promise.resolve()
 // The reports already sent again under a generation the router named, so a second refusal drops them.
 const resent = new WeakSet<Report>()
+// The set of a run that ended before the router acknowledged its start, by the queued release that ends the run, so
+// that acknowledgment puts it right ahead of that release. A later run of the agent ends under a release of its own.
+const closingSets = new WeakMap<Report, AgentFactSet>()
 const model: Model = freshModel()
 // The title the client last named for a session, with that session's id: a title counts only for its own session.
 let seenTitle: { id: string; title: string | undefined } | undefined
@@ -300,10 +300,9 @@ function dropCommands(owner: AgentRecord, drop: (task: SavedTask) => boolean): v
 
 function release(agentId: string): void {
   if (agentId === MAIN) return
-  // A run whose start the router has not acknowledged sent no set yet, so the set waits for that acknowledgment.
   const facts = model.agents.get(agentId)?.facts
-  if (session !== undefined && !session.announced.has(agentId) && facts !== undefined &&
-    Object.keys(facts).length > 0) session.lastFacts.set(agentId, facts)
+  const unsent = session !== undefined && !session.announced.has(agentId)
+  const earlier = releaseQueued(agentId)
   const known = model.agents.delete(agentId)
   model.turning.delete(agentId)
   model.released.add(agentId)
@@ -311,6 +310,13 @@ function release(agentId: string): void {
   // for one more cache TTL. A start or a state still queued gives the router a run again, so the release follows it.
   const releasedByRouter = session?.routerReleased.delete(agentId) === true && !holdsRun(agentId)
   if (!releasedByRouter && (known || session?.announced.has(agentId) === true)) report(agentId, 'released')
+  // A run whose start the router has not acknowledged sent no set yet, so the set waits for that acknowledgment
+  // beside the release this run queued. A release that collapsed into an earlier one ends a run whose start never
+  // left, so the earlier release keeps what it holds.
+  const ending = earlier ? undefined : queue.reports.find((queued) => isRelease(queued, agentId))
+  if (unsent && ending !== undefined && facts !== undefined && Object.keys(facts).length > 0) {
+    closingSets.set(ending, facts)
+  }
   // A released agent that resumes under its id is announced again, which restarts it on the router.
   session?.announced.delete(agentId)
   for (const owner of [...model.agents.values()]) {
@@ -725,7 +731,6 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
     routerReleased: new Set(),
     stopped: false,
     factsDue: false,
-    lastFacts: new Map(),
   }
   queue.reports = collapse([], startReport())
   queue.deferred = new Map()
@@ -1102,17 +1107,15 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
     } else {
       // The run ended while its start was out, so the agent stays out of `announced` and its record is gone. The
       // router holds the run until the queued release arrives, and the set the run left goes right ahead of it.
-      const last = record.lastFacts.get(report.agent_id)
+      const last = closingSets.get(queue.reports[at] as Report)
       if (last !== undefined) {
         queue.reports.splice(at, 0, { event: 'agent_facts', agent_id: report.agent_id, ...last })
       }
     }
-    record.lastFacts.delete(report.agent_id)
   }
   if (report.event === 'state' && report.state === 'released') {
     // The router ended the run, so it could only refuse what is still queued for it.
     queue.reports = queue.reports.filter((queued) => !sameAgent(queued, 'agent_facts', report.agent_id))
-    record.lastFacts.delete(report.agent_id)
   }
   if (report.event === 'session_start') {
     if (record.conflicted === true && report.previous_instance_id !== undefined) {

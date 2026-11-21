@@ -858,6 +858,54 @@ test('an agent that ends while its start is out sends its facts ahead of its rel
   expect(router.requests[3]).toMatchObject({ agent_id: 'worker-1', state: 'released' })
 })
 
+test('a second run that ends while the first run\'s start is out leaves the first run its own set', AGENTS,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    router.answer((_body, ack) => ok(ack))
+    router.answer(async (_body, ack) => {
+      await clock.sleep(2000)
+      return ok(ack)
+    })
+    await start($, clock)
+    router.setAgents([])
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await spawn($, clock, REVIEWER)
+    await complete($, clock, 'worker-1')
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await spawn($, clock, { ...REVIEWER, description: 'Review the export job' })
+    await complete($, clock, 'worker-1')
+    await clock.advance(2000)
+    // The router holds the first run alone, since the second run's start never left behind the first release.
+    expect(agentFacts(router)).toEqual([REVIEWER_FACTS])
+  })
+
+test('a run that ends while the earlier run\'s release is out sends its set ahead of its own release', AGENTS,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await spawn($, clock, REVIEWER)
+    router.answer(async (_body, ack) => {
+      await clock.sleep(2000)
+      return ok(ack)
+    })
+    router.setAgents([])
+    await complete($, clock, 'worker-1')
+    // The agent runs again under its id while its release is out, and ends before that release is answered.
+    router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW, description: 'Review the export job' }])
+    await step($, clock, 'worker-1')
+    router.setAgents([{ id: 'worker-1', status: 'completed' }])
+    await complete($, clock, 'worker-1')
+    await clock.advance(2000)
+    expect(under(router, 'session-a')).toEqual([
+      'session_start', 'agent_start', 'agent_facts', 'state worker-1 released', 'agent_start', 'agent_facts',
+      'state worker-1 released',
+    ])
+    expect(agentFacts(router)).toEqual([REVIEWER_FACTS, {
+      agent_id: 'worker-1', agent_type: 'code-reviewer', description: 'Review the export job', name: 'reviewer',
+    }])
+  })
+
 test('a failed facts report of a run that ended early is passed by its release', AGENTS, async ($, on) => {
   const { clock, router } = host(on)
   router.answer((_body, ack) => ok(ack))
