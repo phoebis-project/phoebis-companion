@@ -252,7 +252,8 @@ function invalid(body: Record<string, unknown>): string | undefined {
 }
 
 export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}): FakeRouter {
-  // The engine answers a stop event itself; under test the fake host stands in, so the mod's hook can pass it on.
+  // The engine answers these classic events itself, the two stops, the session's start and the prompt's submit. Under
+  // test the fake host stands in, so the mod's hooks can pass each on.
   on('classic.Stop', async () => ({}))
   on('classic.SubagentStop', async () => ({}))
   on('classic.SessionStart', async () => ({}))

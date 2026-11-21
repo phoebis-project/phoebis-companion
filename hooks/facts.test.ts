@@ -103,6 +103,16 @@ test('a title seen under a cleared session does not go out under the new id', TI
     .toEqual(['session_start', 'activity'])
 })
 
+test('a title seen behind the prompt\'s read leaves at the end of main\'s turn', TITLED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  await prompt($, clock)
+  await titled($, clock, 'UserPromptSubmit', 'session-a', 'Checkout retry')
+  await $.turn.complete({ turnId: 'turn-1', reason: 'answer', answer: '', durationMs: 0, isAborted: false })
+  await clock.settle()
+  expect(facts(router)).toEqual([{ title: 'Checkout retry' }])
+})
+
 test('a facts report a router without the two events refuses is dropped and not sent again at the next prompt',
   TITLED, async ($, on) => {
     const { clock, router } = host(on)

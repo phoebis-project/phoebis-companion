@@ -12,7 +12,7 @@ relay](../router/relay.md#the-keepalive-protocol).
 | `classic.SessionStart` | the session's custom title, with Session title reports on | none of its own: the mod keeps the title for the next read |
 | `prompt.submit` from `bridge`, `composer`, `sdk` or `slack-ping` | a real prompt | `activity` kind `prompt` for main |
 | `prompt.submit` from `scheduled-trigger` | a cron or a wakeup fired | it leaves the crons or moves to its next fire |
-| `classic.UserPromptSubmit` | the session's custom title, with Session title reports on | the same |
+| `classic.UserPromptSubmit` | the session's custom title, with Session title reports on | none of its own: the mod keeps the title for the next read |
 | `prompt.edit` | the person is typing | `activity` kind `presence` for main, at most once a minute |
 | `turn.step` | a model request of main or a subagent | `state busy` when the agent was not busy |
 | `tool.call` before the tool runs | a tool runs | `state busy` when the agent was not busy |
@@ -24,7 +24,7 @@ relay](../router/relay.md#the-keepalive-protocol).
 | `classic.SubagentStop` | a subagent's turn ended, with the background list | the same |
 | `turn.complete` of a subagent | the subagent's turn ended | `state parked` on its open set, or `state released` |
 | `turn.complete` of main | main's turn ended | `state idle`, or `state parked` with its park |
-| an acknowledged `session_start`, a `prompt.submit` and a `turn.complete` of main | the session's facts are read | `session_facts` where the set changed, and after each registration where the set, the last set sent or a set the router did not confirm holds a fact |
+| an acknowledged `session_start`, a `prompt.submit` and a `turn.complete` of main | the session's facts are read | `session_facts` where the set changed, and after each registration where the set or the last set sent holds a fact or a report is still owed to the router |
 | `session.end` | the session ends or changes id | `session_end`, one request |
 | the heartbeat timer | time passed | the session id check, the reconcile, then `heartbeat` |
 
@@ -117,11 +117,12 @@ each of main's turns. A title counts only for the session id its event names, so
 goes out under the new id. In a default install a session reports no fact.
 
 A `session_facts` report states the whole set, so a fact that is gone is left out of the next report and the router
-clears it. The mod sends the set where it changed, and after each acknowledged registration where the set, the last set
-sent or a set the router did not confirm holds a fact, since the router's record may be a new one. The mod cleans each
-value before it sends it: each run of line breaks and tabs folds to one space, control characters, format characters
-and unpaired surrogates go, the ends are trimmed, and a title past 256 bytes is cut on a whole character. The router
-applies the same rules, and [the event's members](../router/relay.md#the-keepalive-protocol) are on The relay.
+clears it. The mod sends the set where it changed, and after each acknowledged registration where the set or the last
+set sent holds a fact or where a report the router did not confirm is still owed, a clear among them, since the
+router's record may be a new one. The mod cleans each value before it sends it: each run of line breaks and tabs folds
+to one space, control characters, format characters and unpaired surrogates go, the ends are trimmed, and a title past
+256 bytes is cut on a whole character. The router applies the same rules, and [the event's
+members](../router/relay.md#the-keepalive-protocol) are on The relay.
 
 A facts report goes out behind each lifecycle report in the queue and waits under a backoff of its own, so a report the
 router refuses or cannot take costs the facts alone and never a heartbeat. A fact the person withdrew, by turning the
@@ -167,7 +168,8 @@ router's page [The companion mod](../router/companion-mod.md), under "An owner m
 
 The mod runs one shell command at load, `echo $PPID`, to read the client process's identity, and no other. It hooks two
 settings-hook events, `classic.Stop` and `classic.SubagentStop`, for the background list they carry. With Session title
-reports on it also hooks `classic.SessionStart` and `classic.UserPromptSubmit` and reads their title member alone, never
-a prompt's text. It reads no transcript, no background command's output and no conversation text. It reads no file. It
-keeps the key `identities` in its own store, which Claude Code holds as a file under the user's configuration
-directory, and its settings live where Claude Code keeps a plugin's configuration, the Router key in its secure storage.
+reports on it also hooks `classic.SessionStart` and `classic.UserPromptSubmit` and reads their title member and their
+session id alone, never a prompt's text. It reads no transcript, no background command's output and no conversation
+text. It reads no file. It keeps the key `identities` in its own store, which Claude Code holds as a file under the
+user's configuration directory, and its settings live where Claude Code keeps a plugin's configuration, the Router key
+in its secure storage.

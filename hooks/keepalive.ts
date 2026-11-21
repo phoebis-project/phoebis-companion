@@ -895,13 +895,15 @@ function settle($: EngineInterface, config: Settings, record: SessionRecord, rep
     refusedReport($, record, report, answerOf(response.text), now, repeated)
     return
   }
+  // A log call that throws below would otherwise leave the owed mark on a report the router dropped, and each later
+  // registration would send the refused set again.
+  factsSettled(report)
   // Any other answer names a report the router never takes, so the mod drops it rather than retrying. The router
   // keeps no trace of it, which leaves this line as the one sign of a body the mod built wrong.
   const code = answerOf(response.text).code
   const named = code !== undefined && CODE.test(code) ? `with code ${code}` : 'with no code'
   say($, `the router answered status ${response.status} ${named} to the ${report.event} report, so the mod drops it`,
     { to: 'debug' })
-  factsSettled(report)
 }
 
 function delay($: EngineInterface, now: number): void {
