@@ -556,6 +556,26 @@ test('a spawn\'s facts follow its acknowledged start, and a workflow\'s agent se
   expect(events(router)).toEqual(['session_start', 'agent_start', 'agent_facts'])
 })
 
+test('an agent\'s facts follow its start again where the router lost its record', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW }])
+  // The registration, the start and the facts, then a heartbeat the router no longer places, and a new registration
+  // that holds main alone, so the agent starts again.
+  router.answer((_body, ack) => ok(ack))
+  router.answer((_body, ack) => ok(ack))
+  router.answer((_body, ack) => ok(ack))
+  router.answer(() => refusal('unknown_instance'))
+  router.answer((_body, ack) => ok({ ...ack, agents: [{ agent_id: 'main', state: 'busy', request_generation: 1 }] }))
+  await start($, clock)
+  router.answerSpawn(() => ({ agentId: 'worker-1' }))
+  await spawn($, clock, REVIEWER)
+  await clock.advance(25000)
+  expect(agentFacts(router)).toEqual([
+    { agent_id: 'worker-1', agent_type: 'code-reviewer', description: 'Review the retry loop', name: 'reviewer' },
+    { agent_id: 'worker-1', agent_type: 'code-reviewer', description: 'Review the retry loop', name: 'reviewer' },
+  ])
+})
+
 test('facts the router refuses for an unknown agent are dropped and start no agent', AGENTS, async ($, on) => {
   const { clock, router } = host(on)
   router.answer((_body, ack) => ok(ack))
@@ -649,25 +669,26 @@ test('an agent list that answers behind a clear adopts no agent', AGENTS, async 
   expect(under(router, 'session-b')).toEqual(['session_start', 'state main idle'])
 })
 
-test('a tool call whose list read a clear overtakes files nothing under the new session', AGENTS, async ($, on) => {
-  const { clock, router } = host(on)
-  router.setAgents([{ id: 'worker-1', status: 'running' }])
-  await start($, clock)
-  router.delayList(1000)
-  router.answerTool(() => ({ stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg-1' }))
-  const calling = $.tool.call({
-    tool: 'Bash', tool_use_id: 'toolu_1', command: 'sleep 600', run_in_background: true, agentId: 'worker-1',
-  } as Parameters<Engine['tool']['call']>[0])
-  await clock.settle()
-  await end($, clock, 'clear', 'session-a')
-  router.setId('session-b')
-  await start($, clock)
-  await clock.advance(1000)
-  await calling
-  await complete($, clock)
-  // A command filed under main would park main on it.
-  expect(under(router, 'session-b')).toEqual(['session_start', 'state main idle'])
-})
+test('a tool call whose list read a clear overtakes files nothing under the new session', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    router.setAgents([{ id: 'worker-1', status: 'running' }])
+    await start($, clock)
+    router.delayList(1000)
+    router.answerTool(() => ({ stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg-1' }))
+    const calling = $.tool.call({
+      tool: 'Bash', tool_use_id: 'toolu_1', command: 'sleep 600', run_in_background: true, agentId: 'worker-1',
+    } as Parameters<Engine['tool']['call']>[0])
+    await clock.settle()
+    await end($, clock, 'clear', 'session-a')
+    router.setId('session-b')
+    await start($, clock)
+    await clock.advance(1000)
+    await calling
+    await complete($, clock)
+    // A command filed under main would park main on it.
+    expect(under(router, 'session-b')).toEqual(['session_start', 'state main idle'])
+  })
 
 test('a due heartbeat passes a backlog of facts reports', AGENTS, async ($, on) => {
   const { clock, router } = host(on)
