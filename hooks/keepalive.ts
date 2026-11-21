@@ -142,6 +142,8 @@ let seenTitle: { id: string; title: string | undefined } | undefined
 // Counts the session reads, so a read that finishes behind a later one changes nothing.
 let factReads = 0
 let factReadsDone = 0
+// Counts the transitions of the session record that began, so one overtaken while it read the held work moves nothing.
+let transitions = 0
 
 // A start or a state of the agent's still queued carries a run the router takes after any answer that named the
 // agent released, so that answer no longer says the router ended what the mod holds.
@@ -696,11 +698,14 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
   // closed it, so a current caller revives it.
   const kept = (): boolean => !isCurrent() || (session?.id === id && !session.stopped)
   if (kept() || identity === undefined) return
+  const mine = ++transitions
   // The same id in the same process is a reload of the module or a resume after its end, and the host still holds
   // its tracked work. A new id is a new conversation, so nothing the old one had open or scheduled carries over. Read
   // before the session moves, so a pump during the read never writes the old session's work under the new id.
   const held = heldModelFor((await $.state.get(MODEL_REF)).value, id)
-  if (kept()) return
+  // The host answers its calls in no stated order, so a transition that began behind this one read the host's id
+  // later and holds the session the host is in, whichever read of the held work lands last.
+  if (kept() || mine !== transitions) return
   session = {
     id,
     instance: identity.instance,

@@ -920,6 +920,31 @@ test('a start superseded while it waits never revives the session that ended mea
     expect(events(router)).toEqual(['session_start', 'session_end'])
   })
 
+test('a prompt whose read of the held work lands behind a later session\'s start leaves that session in place',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    await end($, clock, 'clear', 'session-a')
+    router.setId('session-b')
+    // The prompt typed into session-b reads the held work two seconds late, and a resume moves the host to session-c
+    // meanwhile.
+    router.delayModel(2000)
+    const prompting = $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    router.setId('session-c')
+    await start($, clock)
+    await clock.advance(2000)
+    await prompting
+    await clock.settle()
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await $.agent.spawn({ prompt: '', description: '', subagentType: 'Explore' } as
+      Parameters<Engine['agent']['spawn']>[0])
+    await clock.settle()
+    expect(router.requests.filter((body) => body.session_id === 'session-b')).toEqual([])
+    expect(router.requests.filter((body) => body.event === 'agent_start').map((body) => body.session_id))
+      .toEqual(['session-c'])
+  })
+
 test('a start replaced while it waits in its fence registers no successor after a clear', CONFIGURED,
   async ($, on) => {
     const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])
