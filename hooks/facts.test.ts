@@ -81,6 +81,20 @@ const WORKER_HELD = [
   { agent_id: 'main', state: 'busy', request_generation: 1 },
   { agent_id: 'worker-1', state: 'busy', request_generation: 1 },
 ]
+// What a load left that released a subagent whose set reached the router, and the router's answer that still holds
+// the released record with its facts.
+const RELEASED_MODEL = {
+  id: 'session-a',
+  agents: [{ id: 'main', state: 'busy', open: [], lastPresence: 0 }],
+  crons: [],
+  released: ['worker-1'],
+  routerReleased: [],
+  factsLeft: ['worker-1'],
+}
+const WORKER_RELEASED = [
+  { agent_id: 'main', state: 'busy', request_generation: 1 },
+  { agent_id: 'worker-1', state: 'released', request_generation: 2 },
+]
 
 const ok = (body: unknown): Reply => ({ status: 200, body })
 const refusal = (code: string, extra: Record<string, unknown> = {}): Reply =>
@@ -722,6 +736,41 @@ test('an agent\'s clear owed at a reload goes out at the registration', CONFIGUR
   await start($, clock)
   expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
 })
+
+test('a released agent whose set reached the router is saved as one whose facts the router can still hold', AGENTS,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await spawn($, clock, REVIEWER)
+    // A spawn with no members leaves the agent no set, so the router holds none for it.
+    router.answerSpawn(() => ({ agentId: 'worker-2' }))
+    await spawn($, clock, { description: '', subagentType: '' })
+    router.setAgents([])
+    await complete($, clock, 'worker-1')
+    await complete($, clock, 'worker-2')
+    expect((router.values.get('model') as { factsLeft?: unknown }).factsLeft).toEqual(['worker-1'])
+  })
+
+test('an option turned off clears the facts of a released agent that a step runs again', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: RELEASED_MODEL } })
+    router.answer((_body, ack) => ok({ ...ack, agents: WORKER_RELEASED }))
+    await start($, clock)
+    router.setAgents([{ id: 'worker-1', status: 'running' }])
+    await step($, clock, 'worker-1')
+    expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
+  })
+
+test('an option turned off clears the facts of a released agent that a spawn runs again', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: RELEASED_MODEL } })
+    router.answer((_body, ack) => ok({ ...ack, agents: WORKER_RELEASED }))
+    await start($, clock)
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await spawn($, clock, { description: '', subagentType: 'Explore' })
+    expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
+  })
 
 test('an agent type past its cap leaves without the type', AGENTS, async ($, on) => {
   const { clock, router } = host(on)

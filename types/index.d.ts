@@ -30,8 +30,10 @@ export type SessionFactSet = {
   title?: string
 }
 // `factsOwed` stands while the router has not answered the last set queued for good, an empty set among them.
+// `factsLeft` names the released subagents whose facts the router can still hold, since it restarts a released
+// record with its facts when the agent runs again, so their next run states its set whole.
 export type SavedModel = { id: string; agents: SavedAgent[]; crons: SavedCron[]; released: string[];
-  routerReleased: string[]; facts?: SessionFactSet; factsOwed?: true }
+  routerReleased: string[]; facts?: SessionFactSet; factsOwed?: true; factsLeft?: string[] }
 declare module 'claude-code' {
   interface PluginState { 'phoebis-companion': { identity: Identity; model: SavedModel } }
 }

@@ -94,6 +94,9 @@ type Model = {
   factsQueued: SessionFactSet | undefined
   // A set queued that the router has not answered for good, so a registration sends it again, an empty one too.
   factsOwed: boolean
+  // The released subagents whose last set queued held a member or was owed. The router keeps a released record's
+  // facts until the record leaves and restarts that record when the agent runs again, so the next run owes its set.
+  factsLeft: Set<string>
 }
 
 type FactsSlot<T> = { factsQueued: T | undefined; factsOwed: boolean }
@@ -220,6 +223,7 @@ function freshModel(): Model {
     released: new Set(),
     factsQueued: undefined,
     factsOwed: false,
+    factsLeft: new Set(),
   }
 }
 
@@ -302,9 +306,13 @@ function dropCommands(owner: AgentRecord, drop: (task: SavedTask) => boolean): v
 
 function release(agentId: string): void {
   if (agentId === MAIN) return
-  const facts = model.agents.get(agentId)?.facts
+  const record = model.agents.get(agentId)
+  const facts = record?.facts
   const unsent = session !== undefined && !session.announced.has(agentId)
   const earlier = releaseQueued(agentId)
+  if (record !== undefined && (record.factsOwed || Object.keys(record.factsQueued ?? {}).length > 0)) {
+    model.factsLeft.add(agentId)
+  }
   const known = model.agents.delete(agentId)
   model.turning.delete(agentId)
   model.released.add(agentId)
@@ -326,12 +334,19 @@ function release(agentId: string): void {
   }
 }
 
+// The router restarts a released record with the facts it kept, so a fresh record of an agent whose facts it can
+// still hold owes its set, and the start's acknowledgment states it whole, without members where the option is off.
+function takeFactsLeft(agent: AgentRecord): void {
+  if (model.factsLeft.delete(agent.id)) agent.factsOwed = true
+}
+
 // A live agent the mod meets first in the client's list or the router's answer (one that ran before this load, or one
 // resumed after its release) joins its parent's open set, so the parent stays parked on it until it ends.
 function adopt(agentId: string, parentId: string | undefined, state: AgentRecord['state'], facts: AgentFactSet): void {
   const parent = parentId ?? MAIN
   const agent = freshRecord(agentId, state, parent)
   agent.facts = facts
+  takeFactsLeft(agent)
   model.released.delete(agentId)
   session?.routerReleased.delete(agentId)
   model.agents.set(agentId, agent)
@@ -469,6 +484,7 @@ function spawned(agentId: string, parentId: string): AgentRecord {
   let agent = model.agents.get(agentId)
   if (agent === undefined) {
     agent = freshRecord(agentId, 'busy', parentId)
+    takeFactsLeft(agent)
     model.agents.set(agentId, agent)
     announce(agentId)
   } else {
@@ -645,6 +661,7 @@ function snapshotModel(record: SessionRecord): SavedModel {
     released: [...model.released],
     routerReleased: [...record.routerReleased],
     ...savedFacts(model),
+    ...(model.factsLeft.size === 0 ? {} : { factsLeft: [...model.factsLeft] }),
   }
 }
 
@@ -673,6 +690,7 @@ function restoreModel(saved: SavedModel, sessionRecord: SessionRecord): void {
   }))
   model.crons = new Map(saved.crons.map((cron) => [cron.id, { ...cron }]))
   model.released = new Set(saved.released)
+  model.factsLeft = new Set(saved.factsLeft ?? [])
   sessionRecord.routerReleased = new Set(saved.routerReleased)
   restoreFacts(model, saved)
   // No title event fires again at a reload, so the saved title stands until the next one. An event that saw the
