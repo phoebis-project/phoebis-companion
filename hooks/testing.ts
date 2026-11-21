@@ -171,6 +171,11 @@ export type FakeRouter = {
   delayList: (ms: number) => void
   /** Holds the next `$.state.get` of the plugin's tracked work for this long on the clock before it answers. */
   delayModel: (ms: number) => void
+  /**
+   * Holds the next `$.state.set` of the plugin's tracked work for this long on the clock before the write lands, as a
+   * host that completes its calls in no stated order can land it behind a later one.
+   */
+  delayModelWrite: (ms: number) => void
   /** Holds the fence's next read of the stored pairs (`$.store.get`) for this long on the clock before it answers. */
   delayStore: (ms: number) => void
   /**
@@ -304,6 +309,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   let idDelayMs = 0
   let listDelayMs = 0
   let modelDelayMs = 0
+  let modelWriteDelayMs = 0
   let storeDelayMs = 0
   // The agents the router holds per session, each with its generation.
   const held = new Map<string, Map<string, number>>()
@@ -384,6 +390,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     delayModel: (ms) => {
       modelDelayMs = ms
+    },
+    delayModelWrite: (ms) => {
+      modelWriteDelayMs = ms
     },
     delayStore: (ms) => {
       storeDelayMs = ms
@@ -529,9 +538,15 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   on('state.set', (_$, e) => {
     router.reached.push('state.set')
     if (e.key !== 'identity') {
-      values.set(e.key, e.value)
-      router.values.set(e.key, e.value)
-      return { value: { isSet: true, version: 1 } }
+      const write = (): { value: { isSet: boolean; version: number } } => {
+        values.set(e.key, e.value)
+        router.values.set(e.key, e.value)
+        return { value: { isSet: true, version: 1 } }
+      }
+      if (e.key !== 'model' || modelWriteDelayMs === 0) return write()
+      const ms = modelWriteDelayMs
+      modelWriteDelayMs = 0
+      return clock.sleep(ms).then(write)
     }
     identity = e.value as Identity
     stateVersion += 1

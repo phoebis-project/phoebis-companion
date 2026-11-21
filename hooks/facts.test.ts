@@ -330,6 +330,20 @@ test('a clear the router did not acknowledge is saved as owed, without the title
     })
   })
 
+test('a write of the tracked work that the host lands last holds no withdrawn title', TITLED, async ($, on) => {
+  const { clock, router } = host(on)
+  await titled($, clock, 'SessionStart', 'session-a', 'Checkout retry')
+  await start($, clock)
+  // Main's turn end writes the work with the title, and the host lands that write two seconds late, behind the
+  // writes of the withdrawal that follows.
+  router.delayModelWrite(2000)
+  await complete($, clock)
+  await titled($, clock, 'UserPromptSubmit', 'session-a')
+  await prompt($, clock)
+  await clock.advance(2000)
+  expect((router.values.get('model') as { facts?: unknown }).facts).toEqual({})
+})
+
 test('a clear owed at a reload goes out at the registration', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on, { state: IDENTITY, values: { model: OWED_MODEL } })
   await start($, clock)

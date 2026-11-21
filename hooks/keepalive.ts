@@ -134,6 +134,7 @@ let onRefused: RefusalHandler = () => undefined
 let factOptions: FactOptions = { agents: false, project: false, title: false }
 // The tracked work as the host last took it, so a pump writes it only when it changed.
 let savedModel: string | undefined
+let modelWrites: Promise<unknown> = Promise.resolve()
 // The reports already sent again under a generation the router named, so a second refusal drops them.
 const resent = new WeakSet<Report>()
 const model: Model = freshModel()
@@ -682,13 +683,21 @@ function heldModelFor(held: unknown, id: string): SavedModel | undefined {
   return held as SavedModel
 }
 
+// The host completes its calls in no stated order, so each write of the tracked work settles before the next one
+// takes its snapshot, as the fence's writes do. An older snapshot that landed last would hold work since withdrawn,
+// and with `savedModel` naming a newer one, nothing would write again until the work changed.
 async function persistModel($: EngineInterface): Promise<void> {
-  if (session === undefined) return
-  const value = snapshotModel(session)
-  const text = JSON.stringify(value)
-  if (text === savedModel) return
-  savedModel = text
-  await $.state.set(MODEL_REF, value)
+  const run = modelWrites.then(async () => {
+    if (session === undefined) return
+    const value = snapshotModel(session)
+    const text = JSON.stringify(value)
+    if (text === savedModel) return
+    await $.state.set(MODEL_REF, value)
+    savedModel = text
+  })
+  // A write that rejects must not stall the ones after it.
+  modelWrites = run.catch(() => undefined)
+  await run
 }
 
 async function ensureSession($: EngineInterface, isCurrent: () => boolean): Promise<void> {
