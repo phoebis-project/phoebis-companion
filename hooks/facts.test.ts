@@ -752,6 +752,26 @@ test('a released agent whose set reached the router is saved as one whose facts 
     expect((router.values.get('model') as { factsLeft?: unknown }).factsLeft).toEqual(['worker-1'])
   })
 
+test('a released agent whose closing set left is saved as one whose facts the router can still hold', AGENTS,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    router.answer((_body, ack) => ok(ack))
+    router.answer(async (_body, ack) => {
+      await clock.sleep(2000)
+      return ok(ack)
+    })
+    await start($, clock)
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await spawn($, clock, REVIEWER)
+    router.setAgents([])
+    await complete($, clock, 'worker-1')
+    await clock.advance(2000)
+    // The set left ahead of the release, and a reload with the option off starts from this saved model, as the case
+    // below does.
+    expect(agentFacts(router)).toEqual([REVIEWER_FACTS])
+    expect((router.values.get('model') as { factsLeft?: unknown }).factsLeft).toEqual(['worker-1'])
+  })
+
 test('an option turned off clears the facts of a released agent that a step runs again', CONFIGURED,
   async ($, on) => {
     const { clock, router } = host(on, { state: IDENTITY, values: { model: RELEASED_MODEL } })

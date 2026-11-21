@@ -94,8 +94,9 @@ type Model = {
   factsQueued: SessionFactSet | undefined
   // A set queued that the router has not answered for good, so a registration sends it again, an empty one too.
   factsOwed: boolean
-  // The released subagents whose last set queued held a member or was owed. The router keeps a released record's
-  // facts until the record leaves and restarts that record when the agent runs again, so the next run owes its set.
+  // The released subagents whose last set queued held a member or was owed, or whose release carries a closing set.
+  // The router keeps a released record's facts until the record leaves and restarts that record when the agent runs
+  // again, so the next run owes its set.
   factsLeft: Set<string>
 }
 
@@ -326,6 +327,8 @@ function release(agentId: string): void {
   const ending = earlier ? undefined : queue.reports.find((queued) => isRelease(queued, agentId))
   if (unsent && ending !== undefined && facts !== undefined && Object.keys(facts).length > 0) {
     closingSets.set(ending, facts)
+    // The set leaves behind this call, ahead of the release, so the router can hold it once the record is released.
+    model.factsLeft.add(agentId)
   }
   // A released agent that resumes under its id is announced again, which restarts it on the router.
   session?.announced.delete(agentId)
