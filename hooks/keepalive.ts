@@ -1,4 +1,4 @@
-import type { AgentInfo, EngineInterface, HttpResponse, On, Timer } from 'claude-code'
+import type { AgentInfo, ClassicEventOf, EngineInterface, HttpResponse, On, Timer, ToolCallInput } from 'claude-code'
 import type { AgentFactSet, Identity, SavedAgent, SavedModel, SavedTask, SessionFactSet } from '../types'
 import { agentFactSet, sameFacts, sessionFactSet } from './facts'
 import type { SessionRead } from './facts'
@@ -396,10 +396,10 @@ async function attribute($: EngineInterface, agentId: string | undefined): Promi
 
 // The task registry the client attaches to a stop event. An open command the registry no longer runs has ended,
 // whatever ended it, and one the registry never held cannot wake its loop, so both leave their owner's open set. A
-// subagent's life is the agent list's to tell, so the registry's subagent rows are left to it.
-function tasksStopped($: EngineInterface, e: unknown): void {
+// subagent's life is the agent list's to tell, so the registry's subagent rows are left to it. An entry goes through
+// `field`, which skips one that is no object, where a typed read would throw and lose the whole registry.
+function tasksStopped($: EngineInterface, listed: unknown): void {
   if (!live()) return
-  const listed = field(e, 'background_tasks')
   if (Array.isArray(listed)) {
     const running = new Set<string>()
     for (const entry of listed) {
@@ -429,8 +429,10 @@ function fired(now: number): void {
   })
 }
 
-async function toolRan($: EngineInterface, agentId: string, e: { tool: string; tool_use_id: string },
-  result: unknown): Promise<void> {
+// The event's members are read as the engine declares them. The result is what `next(e)` resolved to, which another
+// plugin's hook can shape, so its members go through `field`: a typed read throws on a result that is null or
+// undefined, and the throw skips the rest of the mod's step for a call that ran.
+async function toolRan($: EngineInterface, agentId: string, e: ToolCallInput, result: unknown): Promise<void> {
   switch (e.tool) {
     case 'Bash': {
       const task = field(result, 'backgroundTaskId')
@@ -438,7 +440,7 @@ async function toolRan($: EngineInterface, agentId: string, e: { tool: string; t
       const now = await $.clock.now()
       const owner = model.agents.get(agentId)
       if (owner === undefined) return
-      const timeout = field(e, 'timeout')
+      const timeout = e.timeout
       const deadline = commandDeadline(now, typeof timeout === 'number' ? timeout : undefined, bashBounds)
       change(owner, () => owner.open.set(task, { id: task, kind: 'command', deadline }))
       if (owner.id === MAIN && model.turning.has(MAIN)) model.current.add(task)
@@ -446,8 +448,8 @@ async function toolRan($: EngineInterface, agentId: string, e: { tool: string; t
     }
     case 'CronCreate': {
       const id = field(result, 'id')
-      const expression = field(e, 'cron')
-      const recurring = field(e, 'recurring')
+      const expression = e.cron
+      const recurring = e.recurring
       if (typeof id !== 'string' || typeof expression !== 'string') return
       const repeats = typeof recurring === 'boolean' ? recurring : true
       const now = await $.clock.now()
@@ -458,7 +460,7 @@ async function toolRan($: EngineInterface, agentId: string, e: { tool: string; t
       return
     }
     case 'ScheduleWakeup': {
-      const stop = field(e, 'stop') === true
+      const stop = e.stop === true
       const wakeAt = field(result, 'scheduledFor')
       const delay = field(result, 'clampedDelaySeconds')
       if (!stop && typeof wakeAt !== 'number') return
@@ -476,7 +478,7 @@ async function toolRan($: EngineInterface, agentId: string, e: { tool: string; t
       return
     }
     case 'CronDelete': {
-      const id = field(e, 'id')
+      const id = e.id
       if (typeof id === 'string') change(mainAgent(), () => model.crons.delete(id))
       return
     }
@@ -991,10 +993,10 @@ function settleFacts<T extends AgentFactSet | SessionFactSet>(slot: FactsSlot<T>
 
 // Keeps the title an event names with its session's id. An event of the session without a string title leaves the
 // title empty, so the next read sends the set without it.
-function noteTitle(e: unknown): void {
-  const id = field(e, 'session_id')
+function noteTitle(e: ClassicEventOf['classic.SessionStart'] | ClassicEventOf['classic.UserPromptSubmit']): void {
+  const id = e.session_id
   if (typeof id !== 'string') return
-  const title = field(e, 'session_title')
+  const title = e.session_title
   seenTitle = { id, title: typeof title === 'string' ? title : undefined }
 }
 
@@ -1512,6 +1514,7 @@ export function installKeepalive(on: On, refused: RefusalHandler, facts: FactOpt
   on('agent.spawn', async ($, e, next) => {
     const record = session
     const r = await next(e)
+    // Read through `field`, since a typed read throws on a result that is null or undefined, behind a spawn that ran.
     const agentId = field(r, 'agentId')
     if (live() && session === record && typeof agentId === 'string') {
       const parent = holder(e.parentAgentId) ?? MAIN
@@ -1550,12 +1553,12 @@ export function installKeepalive(on: On, refused: RefusalHandler, facts: FactOpt
   // The client's task registry rides every stop event, of main and of each subagent, so a command's end is read
   // there and never from the text of the notification that reported it.
   on('classic.Stop', async ($, e, next) => {
-    tasksStopped($, e)
+    tasksStopped($, e.background_tasks)
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('classic.SubagentStop', async ($, e, next) => {
-    tasksStopped($, e)
+    tasksStopped($, e.background_tasks)
     return next(e)
   }).catch(($, e, next) => next(e))
 
