@@ -198,7 +198,7 @@ export type FakeRouter = {
   denyEnvSet: (reason: string) => void
   /**
    * Denies the next `$.session.id()` with the reason, as a host whose hook on the read refuses it, which rejects the
-   * call. A denial is taken ahead of a hold of `delayId`, so a case denies one start's read while another's is held.
+   * call.
    */
   denyId: (reason: string) => void
   /**
