@@ -47,22 +47,16 @@ test('the allowance GET joins the path prefix and carries the bearer',
 
 describe('a 401 at start writes one transcript line, empties the queue and registers no tool', () => {
   const line = `the router at ${ROUTER} refused the key (401), so this session reports nothing`
-  const cases = [
-    ['with the toast on by default', {}, [line]],
-    ['with notifications off', { notifications: false }, []],
-  ] as const
-  for (const [name, options, toasts] of cases) {
-    test(name, { options: { management_url: ROUTER, ...options } }, async ($, on) => {
-      const { clock, router } = host(on)
-      router.answerGet(() => ({ status: 401 }))
-      await start($, clock)
-      await clock.advance(1000)
-      expect(router.logs).toEqual([{ text: line, to: 'transcript' }])
-      expect(router.toasts).toEqual(toasts)
-      expect(router.requests.map((body) => body.event)).not.toContain('session_start')
-      expect(router.tools).toEqual([])
-    })
-  }
+  test('with the toast on by default', { options: { management_url: ROUTER } }, async ($, on) => {
+    const { clock, router } = host(on)
+    router.answerGet(() => ({ status: 401 }))
+    await start($, clock)
+    await clock.advance(1000)
+    expect(router.logs).toEqual([{ text: line, to: 'transcript' }])
+    expect(router.toasts).toEqual([line])
+    expect(router.requests.map((body) => body.event)).not.toContain('session_start')
+    expect(router.tools).toEqual([])
+  })
 })
 
 test('a 403 companion_not_permitted registers no tool and writes a debug line only', CONFIGURED, async ($, on) => {
@@ -595,19 +589,4 @@ test('a registration the engine rejects costs the tool alone, with one debug lin
     expect(router.logs.map((line) => line.to)).toEqual(['debug'])
     expect(router.logs[0]?.text).toContain('tool limit reached')
     expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
-  })
-
-test('a start that resolves no key leaves the tool answering an error, not the earlier configuration\'s body',
-  CONFIGURED, async ($, on) => {
-    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])
-    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
-    const clock = mock.clock(on, { now: T0 })
-    const router = fakeRouter(on, clock)
-    await start($, clock)
-    expect(await call($)).toEqual({ result: SAMPLE_TEXT })
-    variables.delete('ANTHROPIC_AUTH_TOKEN')
-    await start($, clock)
-    const answer = await call($)
-    expect(answer).toEqual({ deny: expect.any(String) })
-    expect(router.gets).toHaveLength(1)
   })

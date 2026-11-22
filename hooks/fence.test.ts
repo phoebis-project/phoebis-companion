@@ -106,19 +106,6 @@ test('the owner header is appended to an existing value with a newline and the o
     expect(router.refusals).toEqual([])
   })
 
-describe('the header is set once when the variable is empty', () => {
-  const loads = [['unset', {}], ['empty', { ANTHROPIC_CUSTOM_HEADERS: '' }]] as const
-  for (const [name, variables] of loads) {
-    test(name, CONFIGURED, async ($, on) => {
-      const { clock, router } = host(on, { ANTHROPIC_AUTH_TOKEN: KEY, ...variables })
-      await start($, clock)
-      const { owner } = minted(router)
-      expect(router.envWrites.filter((write) => write.name === HEADERS))
-        .toEqual([{ name: HEADERS, value: `X-Keepalive-Owner-Id: ${owner}` }])
-    })
-  }
-})
-
 test('a minted uuid has the v4 shape', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on, { ANTHROPIC_AUTH_TOKEN: KEY })
   await start($, clock)

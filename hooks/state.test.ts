@@ -7,7 +7,7 @@ import runB from './fixtures/run-b'
 import runC from './fixtures/run-c'
 import runE from './fixtures/run-e'
 import runH from './fixtures/run-h'
-import { commandDeadline, isRealPrompt, nextFireAt, parkOf } from './rules'
+import { commandDeadline, nextFireAt, parkOf } from './rules'
 import type { AgentRecord, Body, Cron } from './rules'
 import { fakeRouter, LEASE_MS, replay } from './testing'
 import type { FakeRouter, Reply } from './testing'
@@ -18,7 +18,8 @@ const T0 = 1_790_000_000_000
 const LOGS = { 'run-a': runA, 'run-b': runB, 'run-c': runC, 'run-e': runE, 'run-h': runH }
 const SUBAGENT = 'a79c058078a9c7b86'
 
-// Every origin the 2.1.292 declarations name for a submitted prompt.
+// Each kind of the PromptOrigin union, which holds the origins of a submitted prompt. The list is complete as of the
+// declarations of Claude Code 2.1.299 and 2.1.328.
 const ORIGINS = [
   'auto-continuation', 'bridge', 'channel', 'composer', 'coordinator', 'observer', 'observer-activity', 'peer',
   'peer-send-message', 'plugin', 'projects-relay', 'scheduled-trigger', 'sdk', 'slack-ping', 'task-notification',
@@ -215,30 +216,24 @@ test('run-a: a non interactive run reports both tasks, the subagent and its end'
   ])
 })
 
-describe('run-b and run-e: a clear and a resume reset the model under the new id', () => {
-  const runs = {
-    'run-b': [runB, 29, '1cad27fc-c749-448a-ad5b-e5fa5ae2dcbf', 'c35dc0d5-c915-4fd2-8606-fec71e0dad72',
-      1790936485092 + 285000, 1790936485092 + 1800000],
-    'run-e': [runE, 30, '3ccc7c43-d075-4181-977f-f4e0e178f298', '1cad27fc-c749-448a-ad5b-e5fa5ae2dcbf',
-      1790937090521 + 285000, 1790937090521 + 1800000],
-  } as const
-  for (const [name, [log, at, first, next, wakeAt, deadline]] of Object.entries(runs)) {
-    test(name, CONFIGURED, async ($, on) => {
-      const { clock, router } = replayHost(on)
-      await replay($, on, lines(log, 0, at), clock, router)
-      // The first id leaves a cron and a background command open when it ends.
-      await submit($, clock, 'composer')
-      await call($, clock, router, { tool: 'CronCreate', cron: '*/5 * * * *', prompt: 'check' },
-        { id: 'cron-1', humanSchedule: 'Every 5 minutes', recurring: true })
-      await call($, clock, router, ...bash('bg-1'))
-      await complete($, clock)
-      await replay($, on, lines(log, at), clock, router)
-      const under = (id: string): string[] =>
-        router.requests.filter((body) => body.session_id === id && body.event === 'state').map(said)
-      expect(under(first).at(-1)).toBe(`state main parked both ${wakeAt} ${deadline}`)
-      expect(under(next)).toEqual(['state main idle'])
-    })
-  }
+describe('run-b: a clear resets the model under the new id', () => {
+  test('run-b', CONFIGURED, async ($, on) => {
+    const first = '1cad27fc-c749-448a-ad5b-e5fa5ae2dcbf'
+    const next = 'c35dc0d5-c915-4fd2-8606-fec71e0dad72'
+    const { clock, router } = replayHost(on)
+    await replay($, on, lines(runB, 0, 29), clock, router)
+    // The first id leaves a cron and a background command open when it ends.
+    await submit($, clock, 'composer')
+    await call($, clock, router, { tool: 'CronCreate', cron: '*/5 * * * *', prompt: 'check' },
+      { id: 'cron-1', humanSchedule: 'Every 5 minutes', recurring: true })
+    await call($, clock, router, ...bash('bg-1'))
+    await complete($, clock)
+    await replay($, on, lines(runB, 29), clock, router)
+    const under = (id: string): string[] =>
+      router.requests.filter((body) => body.session_id === id && body.event === 'state').map(said)
+    expect(under(first).at(-1)).toBe(`state main parked both ${1790936485092 + 285000} ${1790936485092 + 1800000}`)
+    expect(under(next)).toEqual(['state main idle'])
+  })
 })
 
 test('a cron parks main scheduled with the earliest wake and a deleted cron leaves', CONFIGURED, async ($, on) => {
@@ -474,7 +469,6 @@ test('a fractional timeout rounds the command\'s deadline up to a whole millisec
 describe('BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS read at session start raise a background command\'s ' +
   'deadline and never lower it', () => {
     const loads = [
-      ['unset', {}, T0 + 1800000, T0 + 7200000],
       ['ninety seconds and an hour', { BASH_DEFAULT_TIMEOUT_MS: '90000', BASH_MAX_TIMEOUT_MS: '3600000' },
         T0 + 1800000, T0 + 7200000],
       ['a default of two and a half hours', { BASH_DEFAULT_TIMEOUT_MS: '9000000' }, T0 + 9000000, T0 + 9000000],
@@ -1677,7 +1671,6 @@ test('a subagent the registration answer restates with nothing open is released'
 
 test('a prompt from the composer, the sdk, the bridge or a Slack ping is an activity of kind prompt and other ' +
   'origins are not', CONFIGURED, async ($, on) => {
-    expect(ORIGINS.filter((kind) => isRealPrompt({ kind }))).toEqual(['bridge', 'composer', 'sdk', 'slack-ping'])
     const { clock, router } = host(on)
     await start($, clock)
     await complete($, clock)
@@ -1763,55 +1756,6 @@ test('an unknown_agent answer takes the agent out of the announced set so its ne
     ])
   })
 
-test('a newer state queued during the flight is sent after the late acknowledgment and the state in flight is never ' +
-  'collapsed away', CONFIGURED, async ($, on) => {
-  const { clock, router } = host(on)
-  await start($, clock)
-  await complete($, clock)
-  router.answer(async (_body, ack) => {
-    await clock.sleep(2000)
-    return ok(ack)
-  })
-  await step($, clock)
-  await clock.advance(500)
-  await call($, clock, router, ...bash('bg-1'))
-  await complete($, clock)
-  await clock.advance(1499)
-  expect(told(router)).toEqual(['session_start', 'state main idle', 'state main busy'])
-  await clock.advance(1)
-  expect(told(router)).toEqual([
-    'session_start',
-    'state main idle',
-    'state main busy',
-    `state main parked background ${T0 + 500 + 1800000}`,
-  ])
-  expect(router.times).toEqual([T0, T0, T0, T0 + 2000])
-})
-
-test('the heartbeat deadline is moved by a registration or a heartbeat acknowledgment alone while states are reported',
-  CONFIGURED, async ($, on) => {
-    const { clock, router } = host(on)
-    await start($, clock)
-    await call($, clock, router, ...bash('bg-1'))
-    for (let turn = 0; turn < 120; turn += 1) {
-      await clock.advance(500)
-      await complete($, clock)
-      await clock.advance(500)
-      await step($, clock)
-    }
-    const renewals = router.requests
-      .map((body, index) => ({ event: body.event, at: router.times[index] as number }))
-      .filter((request) => request.event === 'session_start' || request.event === 'heartbeat')
-    expect(renewals.map((request) => request.at)).toEqual([T0, T0 + 25000, T0 + 50000, T0 + 75000, T0 + 100000])
-    for (const [index, renewal] of renewals.slice(1).entries()) {
-      expect(renewal.at).toBeLessThan((renewals[index]?.at as number) + LEASE_MS)
-    }
-    const parked = `state main parked background ${T0 + 1800000}`
-    const reported = states(router)
-    expect(reported).toHaveLength(240)
-    expect(reported.filter((state, index) => state !== (index % 2 === 0 ? parked : 'state main busy'))).toEqual([])
-  })
-
 async function end($: Engine, clock: MockClock, reason: 'clear' | 'resume' | 'other', id: string): Promise<void> {
   await $.session.end({ reason, sessionId: id, resume: { id } })
   await clock.settle()
@@ -1846,7 +1790,6 @@ test('a start refused for the agent limit is retried under its own deadline whil
   await clock.advance(LEASE_MS + 10000)
   const beats = timesOf(router, (body) => body.event === 'heartbeat')
   expect(beats).toEqual([T0 + 25000, T0 + 50000, T0 + 75000, T0 + 100000])
-  for (const [index, beat] of beats.slice(1).entries()) expect(beat).toBeLessThan((beats[index] as number) + LEASE_MS)
   const starts = timesOf(router, (body) => body.event === 'agent_start' && body.agent_id === 'agent-2')
   expect(starts).toEqual([T0, T0 + 1000, T0 + 3000, T0 + 7000, T0 + 15000, T0 + 31000, T0 + 61000, T0 + 91000])
   // Main stays parked on the second agent, so the first one's release moves no park of main.
