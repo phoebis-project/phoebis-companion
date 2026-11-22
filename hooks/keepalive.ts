@@ -1,4 +1,13 @@
-import type { AgentInfo, ClassicEventOf, EngineInterface, HttpResponse, On, Timer, ToolCallInput } from 'claude-code'
+import type {
+  AgentInfo,
+  ClassicEventOf,
+  EngineInterface,
+  Frozen,
+  HttpResponse,
+  On,
+  Timer,
+  ToolCallInput,
+} from 'claude-code'
 import type { AgentFactSet, Identity, SavedAgent, SavedModel, SavedTask, SessionFactSet } from '../types'
 import { agentFactSet, sameFacts, sessionFactSet } from './facts'
 import type { SessionRead } from './facts'
@@ -432,7 +441,7 @@ function fired(now: number): void {
 // The event's members are read as the engine declares them. The result is what `next(e)` resolved to, which another
 // plugin's hook can shape, so its members go through `field`: a typed read throws on a result that is null or
 // undefined, and the throw skips the rest of the mod's step for a call that ran.
-async function toolRan($: EngineInterface, agentId: string, e: ToolCallInput, result: unknown): Promise<void> {
+async function toolRan($: EngineInterface, agentId: string, e: Frozen<ToolCallInput>, result: unknown): Promise<void> {
   switch (e.tool) {
     case 'Bash': {
       const task = field(result, 'backgroundTaskId')
@@ -993,7 +1002,8 @@ function settleFacts<T extends AgentFactSet | SessionFactSet>(slot: FactsSlot<T>
 
 // Keeps the title an event names with its session's id. An event of the session without a string title leaves the
 // title empty, so the next read sends the set without it.
-function noteTitle(e: ClassicEventOf['classic.SessionStart'] | ClassicEventOf['classic.UserPromptSubmit']): void {
+function noteTitle(e: Frozen<ClassicEventOf['classic.SessionStart'] |
+  ClassicEventOf['classic.UserPromptSubmit']>): void {
   const id = e.session_id
   if (typeof id !== 'string') return
   const title = e.session_title
