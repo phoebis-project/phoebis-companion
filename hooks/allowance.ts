@@ -51,7 +51,10 @@ const DESCRIPTION = [
 
 type Fetched = { status: number; text: string } | { failure: string }
 
-/** What the start check does with the answer, or `stale` when a later start began while its GET was out. */
+/**
+ * What the start check does with the answer, or `stale` when a later start began while its GET or its registration was
+ * out.
+ */
 type StartOutcome = 'register' | 'not_permitted' | 'refused' | 'stale' | 'unreachable'
 
 // The engine refuses a registered tool's result that is neither a string nor a list of content blocks, so an MCP
@@ -59,6 +62,10 @@ type StartOutcome = 'register' | 'not_permitted' | 'refused' | 'stale' | 'unreac
 type ToolAnswer = { result: string } | { deny: string }
 
 const NOT_PERMITTED = 'this key may not read the allowance'
+// The tail of the unreachable line behind a registration that the engine refused. The transcript line and the toast
+// both take it through `tell`. It claims what this start knows, since a tool that an earlier start registered outlives
+// a later start.
+const TOOL_REFUSED = 'and the engine refused the allowance tool, so this start registered none'
 
 // The entry names its session, since a /clear starts a new session id with no session.start to clear the cache.
 let cache: { at: number; sessionId: string; text: string } | undefined
@@ -137,7 +144,8 @@ export async function answerCall($: EngineInterface, settings: Settings, session
   return answer(body)
 }
 
-async function registerTool($: EngineInterface): Promise<void> {
+/** Registers the tool and answers whether the engine took it. A refusal goes to the debug log with its reason. */
+async function registerTool($: EngineInterface): Promise<boolean> {
   try {
     await $.tool.register({
       name: TOOL_NAME,
@@ -145,13 +153,18 @@ async function registerTool($: EngineInterface): Promise<void> {
       inputSchema: { type: 'object', properties: {} },
       isDeferred: false,
     })
+    return true
   } catch (error) {
     // A registration the engine refuses costs the tool alone, never the keepalive start that follows it.
     say($, `the allowance tool could not be registered (${errorText(error)})`, { to: 'debug' })
+    return false
   }
 }
 
-/** Makes every start check whose GET is still out stale, and keeps a pending call's answer out of the cache. */
+/**
+ * Makes every start check whose GET or registration is still out stale, and keeps a pending call's answer out of the
+ * cache.
+ */
 export function retireStarts(): void {
   generation += 1
 }
@@ -160,7 +173,9 @@ export function retireStarts(): void {
  * The start check: the cache cleared, one GET bounded by WAIT_MS, the transcript or debug line with its toast, and the
  * tool's registration on every outcome but a refused key and a withheld permission. A check whose GET a later start
  * overtook answers `stale` and does nothing after the GET. A refused key calls `clear` ahead of its line, so no earlier
- * start installs its settings between the two.
+ * start installs its settings between the two. The line of an unreachable router goes out behind the registration,
+ * whose answer picks its tail, and a check that a later start overtook during the registration answers `stale` and
+ * tells no line.
  */
 export async function startCheck($: EngineInterface, settings: Settings, sessionId: string,
   tell: (line: string) => void, clear: () => void): Promise<StartOutcome> {
@@ -184,9 +199,16 @@ export async function startCheck($: EngineInterface, settings: Settings, session
     tell(redactSecrets(`the router at ${settings.url} refused the key (401), so this session reports nothing`,
       settings.key))
   }
-  if (outcome === 'unreachable') tell(`${unreachable(fetched, settings)}, the allowance tool answers once it is back`)
   // The tool list sits at the front of the prompt's cached prefix, so the tool is registered while the router is
   // unreachable rather than appearing later and rewriting the whole prefix once.
-  if (outcome === 'register' || outcome === 'unreachable') await registerTool($)
+  if (outcome === 'register' || outcome === 'unreachable') {
+    const registered = await registerTool($)
+    // A later start can begin while the registration is out, and a check that it retired tells no line.
+    if (sent !== generation) return 'stale'
+    if (outcome === 'unreachable') {
+      const tail = registered ? 'the allowance tool answers once it is back' : TOOL_REFUSED
+      tell(`${unreachable(fetched, settings)}, ${tail}`)
+    }
+  }
   return outcome
 }

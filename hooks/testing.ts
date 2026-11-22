@@ -184,6 +184,11 @@ export type FakeRouter = {
    * host that completes its calls in no stated order can land it behind a later one.
    */
   delayModelWrite: (ms: number) => void
+  /**
+   * Holds the next `$.tool.register` for this long on the clock before it answers. A denial of `denyRegister` is taken
+   * ahead of the hold and uses none of it.
+   */
+  delayRegister: (ms: number) => void
   /** Holds the fence's next read of the stored pairs (`$.store.get`) for this long on the clock before it answers. */
   delayStore: (ms: number) => void
   /**
@@ -337,6 +342,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   let listDelayMs = 0
   let modelDelayMs = 0
   let modelWriteDelayMs = 0
+  let registerDelayMs = 0
   let storeDelayMs = 0
   // The agents the router holds per session, each with its generation.
   const held = new Map<string, Map<string, number>>()
@@ -426,6 +432,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     delayModelWrite: (ms) => {
       modelWriteDelayMs = ms
+    },
+    delayRegister: (ms) => {
+      registerDelayMs = ms
     },
     delayStore: (ms) => {
       storeDelayMs = ms
@@ -657,10 +666,15 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     router.toasts.push(e.text)
     return { value: undefined }
   })
-  on('tool.register', (_$, e) => {
+  on('tool.register', async (_$, e) => {
     router.reached.push('tool.register')
     const denial = registerDenials.shift()
     if (denial !== undefined) return { deny: denial }
+    if (registerDelayMs > 0) {
+      const ms = registerDelayMs
+      registerDelayMs = 0
+      await clock.sleep(ms)
+    }
     router.tools.push(e)
     return { value: { tool: `mcp__phoebis-companion__${e.name}` } }
   })

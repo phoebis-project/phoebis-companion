@@ -11,7 +11,7 @@ Code shows each of the mod's transcript lines under the mod's name.
 | `200` with the allowance body | Registers the tool and keeps the body as the first entry of the tool's cache. No line. |
 | `403` with the code `companion_not_permitted` | Registers no tool, since the operator withheld the permission, and writes `this key may not read the allowance` to Claude Code's debug log alone, which tags the line with the mod's name. The lifecycle reports still go out. |
 | `401` | Writes `phoebis-companion: the router at <url> refused the key (401), so this session reports nothing` to the transcript, registers no tool, and empties the keepalive queue, as a `401` on the keepalive route does. |
-| anything else | Writes `phoebis-companion: no answer from the router at <url> (<status, failure or "not the allowance">), the allowance tool answers once it is back` to the transcript and registers the tool anyway. |
+| anything else | Registers the tool and then writes `phoebis-companion: no answer from the router at <url> (<status, failure or "not the allowance">), the allowance tool answers once it is back` to the transcript. Where Claude Code refuses the registration, the line ends on `and the engine refused the allowance tool, so this start registered none` in place of its last clause. |
 
 The lifecycle reports of the `403` row go out while the setting Cache warming reports is on
 ([Configure](install.md#configure)).
@@ -21,7 +21,9 @@ the allowance, such as the console page the admin listener serves for an unknown
 admin listener in place of the proxy listener. The tool is registered anyway because the tool list sits at the front of
 the prompt's cached prefix: a tool that appears later in the session rewrites the whole prefix once, and a resumed
 session pays for its whole conversation. While the router stays unreachable, a call of the tool answers the failure's
-text. The keepalive part retries along its backoff as [The relay](../router/relay.md#the-keepalive-protocol) states.
+text. Where Claude Code refuses the registration, a session that holds the tool from an earlier start keeps it, and a
+session without one gets it at a reload of the plugin or in a new session. The keepalive part retries along its backoff
+as [The relay](../router/relay.md#the-keepalive-protocol) states.
 
 With Start check toasts on, each transcript line the mod writes at session start, the three lines
 [Configure](install.md#configure) names for an unset setting included, also raises a toast with the same text. A failure

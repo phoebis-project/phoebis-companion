@@ -646,3 +646,35 @@ test('a registration the engine rejects costs the tool alone, with one debug lin
     expect(router.logs[0]?.text).toContain('tool limit reached')
     expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
   })
+
+test('the unreachable line promises the tool only behind a registration that the engine took', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    router.answerGet(() => ({ status: 503 }))
+    router.answerGet(() => ({ status: 503 }))
+    router.denyRegister('tool limit reached')
+    await start($, clock)
+    await start($, clock)
+    expect(router.logs.filter((line) => line.to === 'transcript').map((line) => line.text)).toEqual([
+      `no answer from the router at ${ROUTER} (503), ` +
+        'and the engine refused the allowance tool, so this start registered none',
+      `no answer from the router at ${ROUTER} (503), the allowance tool answers once it is back`,
+    ])
+  })
+
+test('a start whose registration a later start overtakes tells no line of its own', async ($, on) => {
+  const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'k-a'], ['ANTHROPIC_BASE_URL', ROUTER]])
+  on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+  const clock = mock.clock(on, { now: T0 })
+  const router = fakeRouter(on, clock)
+  router.answerGet(() => ({ status: 503 }))
+  router.delayRegister(1_000)
+  const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  variables.set('ANTHROPIC_AUTH_TOKEN', 'k-b')
+  variables.set('ANTHROPIC_BASE_URL', 'http://127.0.0.1:2')
+  await start($, clock)
+  await clock.advance(1_000)
+  await first
+  expect(router.logs).toEqual([])
+})
