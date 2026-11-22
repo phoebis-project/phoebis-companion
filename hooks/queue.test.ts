@@ -633,8 +633,11 @@ describe('session end is sent at once ahead of the queue and past the request in
   })
 })
 
-describe('the mod sends nothing without a url or without a key', () => {
+describe('the mod sends nothing without a url, without a key or with a token that has no management url', () => {
   const loads = [
+    ['with a token and no management url', { token: 'k-option' },
+      { ANTHROPIC_BASE_URL: 'http://repository.example', ANTHROPIC_AUTH_TOKEN: KEY },
+      'the token setting needs the Management URL, so this session reports nothing'],
     ['without a url', {}, {}, 'no management URL from the option or ANTHROPIC_BASE_URL'],
     ['without a key', CONFIGURED.options, {}, 'no router key from the option or the environment'],
   ] as const
