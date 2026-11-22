@@ -21,9 +21,10 @@ the allowance, such as the console page the admin listener serves for an unknown
 admin listener in place of the proxy listener. The tool is registered anyway because the tool list sits at the front of
 the prompt's cached prefix: a tool that appears later in the session rewrites the whole prefix once, and a resumed
 session pays for its whole conversation. While the router stays unreachable, a call of the tool answers the failure's
-text. Where Claude Code refuses the registration, a session that holds the tool from an earlier start keeps it, and a
-session without one gets it at a reload of the plugin or in a new session. The keepalive part retries along its backoff
-as [The relay](../router/relay.md#the-keepalive-protocol) states.
+text. Where Claude Code refuses the registration, on this row or on the first, the mod writes the engine's reason to
+Claude Code's debug log. A session that holds the tool from an earlier start then keeps it, and a session without one
+asks for it again at a reload of the plugin or in a new session. The keepalive part retries along its backoff as [The
+relay](../router/relay.md#the-keepalive-protocol) states.
 
 With Start check toasts on, each transcript line the mod writes at session start, the three lines
 [Configure](install.md#configure) names for an unset setting included, also raises a toast with the same text. A failure
