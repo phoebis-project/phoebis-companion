@@ -238,6 +238,62 @@ test('the start whose session id read lands last holds the reports and the tool 
   })
 })
 
+test('a start that fails while an earlier start waits at its session id read leaves the session unconfigured',
+  async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'k-a'], ['ANTHROPIC_BASE_URL', ROUTER]])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    router.delayId(1_000)
+    const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    // The second start holds settings of its own and fails behind them, at its id read.
+    router.denyId('the session id could not be read')
+    await start($, clock)
+    await clock.advance(1_000)
+    await first
+    const answer = await call($)
+    await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    expect(answer).toEqual({ deny: expect.any(String) })
+    expect(router.gets).toEqual([])
+    expect(router.tools).toEqual([])
+    expect(router.requests).toEqual([])
+  })
+
+test('a start that works behind a failed one keeps the configuration when an earlier session id read lands',
+  async ($, on) => {
+    const variables = new Map([['ANTHROPIC_AUTH_TOKEN', 'k-a'], ['ANTHROPIC_BASE_URL', ROUTER]])
+    on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
+    const clock = mock.clock(on, { now: T0 })
+    const router = fakeRouter(on, clock)
+    router.delayId(1_000)
+    const first = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    router.denyId('the session id could not be read')
+    await start($, clock)
+    variables.set('ANTHROPIC_AUTH_TOKEN', 'k-c')
+    variables.set('ANTHROPIC_BASE_URL', 'http://127.0.0.1:3')
+    await start($, clock)
+    await clock.advance(1_000)
+    await first
+    // The third start sent a report and a GET of its own to the same URL. Each count is taken behind them, so a
+    // session that the first start left without a configuration fails on a list with no entry.
+    const reports = router.targets.length
+    await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    const reported = router.targets.slice(reports).map((target) => target.url)
+    // Past the cache window of the third start's read, so the call reads the router itself.
+    await clock.set(T0 + 12_000)
+    const gets = router.gets.length
+    await call($)
+    expect(reported).toEqual(['http://127.0.0.1:3/v0/keepalive/events'])
+    expect(router.gets.slice(gets)).toEqual([{
+      url: 'http://127.0.0.1:3/v0/companion/allowance?session_id=session-a',
+      headers: { authorization: 'Bearer k-c' },
+    }])
+  })
+
 test('a start with no key during an earlier start\'s lifecycle fence leaves nothing reported', CONFIGURED,
   async ($, on) => {
     const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY]])

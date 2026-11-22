@@ -192,6 +192,11 @@ export type FakeRouter = {
    */
   denyEnvSet: (reason: string) => void
   /**
+   * Denies the next `$.session.id()` with the reason, as a host whose hook on the read refuses it, which rejects the
+   * call. A denial is taken ahead of a hold of `delayId`, so a case denies one start's read while another's is held.
+   */
+  denyId: (reason: string) => void
+  /**
    * Denies the next `$.state.set` of the plugin's identity with the reason, as a host whose hook on the write refuses
    * it, which rejects the call.
    */
@@ -322,6 +327,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const edits: (() => PromptEditResult)[] = []
   const submits: (() => PromptSubmitResult | Promise<PromptSubmitResult>)[] = []
   const envSetDenials: string[] = []
+  const idDenials: string[] = []
   const identityWriteDenials: string[] = []
   const modelWriteDenials: string[] = []
   const registerDenials: string[] = []
@@ -427,6 +433,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     denyEnvSet: (reason) => {
       envSetDenials.push(reason)
     },
+    denyId: (reason) => {
+      idDenials.push(reason)
+    },
     denyIdentityWrite: (reason) => {
       identityWriteDenials.push(reason)
     },
@@ -522,6 +531,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   })
   on('session.id', async () => {
     router.reached.push('session.id')
+    const denial = idDenials.shift()
+    if (denial !== undefined) return { deny: denial }
     if (idDelayMs > 0) {
       const ms = idDelayMs
       idDelayMs = 0

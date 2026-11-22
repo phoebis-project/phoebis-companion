@@ -159,10 +159,11 @@ export function retireStarts(): void {
 /**
  * The start check: the cache cleared, one GET bounded by WAIT_MS, the transcript or debug line with its toast, and the
  * tool's registration on every outcome but a refused key and a withheld permission. A check whose GET a later start
- * overtook answers `stale` and does nothing after the GET.
+ * overtook answers `stale` and does nothing after the GET. A refused key calls `clear` ahead of its line, so no earlier
+ * start installs its settings between the two.
  */
 export async function startCheck($: EngineInterface, settings: Settings, sessionId: string,
-  tell: (line: string) => void): Promise<StartOutcome> {
+  tell: (line: string) => void, clear: () => void): Promise<StartOutcome> {
   // A reload under a changed URL or key must never answer the earlier configuration's body.
   retireStarts()
   const sent = generation
@@ -174,13 +175,16 @@ export async function startCheck($: EngineInterface, settings: Settings, session
   const outcome = outcomeOf(fetched, body)
   if (body !== undefined) cache = { at: now, sessionId, text: body }
   if (outcome === 'not_permitted') say($, NOT_PERMITTED, { to: 'debug' })
-  if (outcome === 'refused' || outcome === 'unreachable') {
-    const line = outcome === 'refused'
-      ? redactSecrets(`the router at ${settings.url} refused the key (401), so this session reports nothing`,
-        settings.key)
-      : `${unreachable(fetched, settings)}, the allowance tool answers once it is back`
-    tell(line)
+  if (outcome === 'refused') {
+    // A refused key clears the configuration in this step, which accepts the 401, and ahead of its line. An earlier
+    // start whose id read lands behind the line would otherwise find no clear and install its settings after the
+    // user read that the session reports nothing. No await falls between the generation test above, the clear and
+    // the line.
+    clear()
+    tell(redactSecrets(`the router at ${settings.url} refused the key (401), so this session reports nothing`,
+      settings.key))
   }
+  if (outcome === 'unreachable') tell(`${unreachable(fetched, settings)}, the allowance tool answers once it is back`)
   // The tool list sits at the front of the prompt's cached prefix, so the tool is registered while the router is
   // unreachable rather than appearing later and rewriting the whole prefix once.
   if (outcome === 'register' || outcome === 'unreachable') await registerTool($)

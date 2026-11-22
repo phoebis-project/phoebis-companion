@@ -35,4 +35,6 @@ clears the refusal an earlier `401` left and registers the session again, so a k
 restart. A `401` on the keepalive route also unconfigures the tool: until such a start, a call answers that the session
 has no usable router configuration, and sends no request. A `403` on the keepalive route empties the queue as a `401`
 does but leaves the tool reading: it comes from something in front of the router, so it refuses the request and not the
-key. It says nothing about whether the key may read the allowance, which the tool's own route answers.
+key. It says nothing about whether the key may read the allowance, which the tool's own route answers. A start that
+leaves no usable configuration also stops an earlier start that has not finished, so the session reports nothing until a
+later start resolves settings.

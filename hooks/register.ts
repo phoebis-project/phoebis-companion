@@ -16,6 +16,9 @@ const UNCONFIGURED = 'the allowance is unknown: this session has no usable route
 
 // Counts the session starts, so a start that throws can tell whether a later start has begun since.
 let starts = 0
+// The number of the latest start that left no configuration, 0 before the first. A start compares its own number with
+// it, so it lives where `starts` lives.
+let cleared = 0
 
 export const register: Register = (on, options) => {
   // The URL and key the last session.start resolved, which the tool reads under. A registered tool outlives a start
@@ -28,7 +31,8 @@ export const register: Register = (on, options) => {
   // tool reading under a URL and key this start no longer resolves, a report queued under that key would go out under
   // a later start's, and an earlier start whose GET is still out would act on its answer once it lands. The heartbeat
   // timer stays, its ticks doing nothing until a later start resolves settings.
-  function deactivate(): void {
+  function deactivate(start: number): void {
+    if (start > cleared) cleared = start
     current = undefined
     clearSettings()
     emptyQueue()
@@ -98,21 +102,23 @@ export const register: Register = (on, options) => {
         const line = 'problem' in resolution
           ? `${MISSING[resolution.missing]} (${resolution.problem})`
           : MISSING[resolution.missing]
-        deactivate()
+        deactivate(start)
         tell(line)
         return next(e)
       }
       resolved = resolution.settings
       const sessionId = await $.session.id()
+      // A later start that left no configuration has told the user so, and this start, whose id read lands afterward,
+      // would bring back settings older than that word. No await falls between this test and the assignment below.
+      if (start < cleared) return next(e)
       // No await falls between setting current and startCheck's generation step, so the start that set current last
       // is the one whose check is not stale.
       current = resolution.settings
-      const outcome = await startCheck($, resolution.settings, sessionId, tell)
-      // A later start that set or cleared current during the check owns the configuration, so this one leaves it.
+      const outcome = await startCheck($, resolution.settings, sessionId, tell, () => deactivate(start))
+      // A later start that set or cleared current during the check owns the configuration, and a refused key cleared
+      // it inside the check, so this start leaves it.
       if (outcome === 'stale' || current !== resolution.settings) return next(e)
-      if (outcome === 'refused') {
-        deactivate()
-      } else if (config.keepalive) {
+      if (config.keepalive) {
         await startKeepalive($, resolution.settings, () => current === resolution.settings)
       }
       return next(e)
@@ -121,7 +127,7 @@ export const register: Register = (on, options) => {
       // whose settings are still current owns the configuration even when a later start began after it.
       if (start === starts || (resolved !== undefined && current === resolved)) {
         const key = current?.key ?? ''
-        deactivate()
+        deactivate(start)
         const line = `the session start hook failed (${errorText(error)}), so this session reports nothing`
         say($, redactSecrets(line, key), { to: 'debug' })
       }
