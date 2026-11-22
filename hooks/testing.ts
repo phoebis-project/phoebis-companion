@@ -241,7 +241,8 @@ export const SAMPLE_ALLOWANCE = {
         projected_at_horizon: 0.45,
         ceiling: 0.95,
         fit: 'fits',
-        runway_minutes: 420,
+        // The runway would pass the window's reset two hours out, and the router answers null for such a runway.
+        runway_minutes: null,
       },
     },
     spend: [],
@@ -254,8 +255,9 @@ export const SAMPLE_ALLOWANCE = {
     last_used_at: '2026-11-08T12:00:00Z',
     warm: true,
     warm_until: '2026-11-08T12:05:00Z',
-    runway_minutes: 420,
-    binding_window: 'five_hour',
+    // No window bounds the pin's runway, and the router then answers both members as null.
+    runway_minutes: null,
+    binding_window: null,
     slow_down: null,
   }],
 }
@@ -303,6 +305,9 @@ function invalid(body: Record<string, unknown>): string | undefined {
     if (!parked && (body.park_kind !== undefined || body.wake_at !== undefined || body.deadline !== undefined)) {
       return 'invalid_event'
     }
+    // The router decodes the kind as an optional string and takes a null as absent. A kind of another type fails its
+    // decoder, and a parked report without a kind is refused with the same code.
+    if (parked && typeof body.park_kind !== 'string') return 'invalid_event'
     if (parked && !['background', 'scheduled', 'both'].includes(String(body.park_kind))) return 'invalid_state'
     if (parked && body.park_kind !== 'background' && body.wake_at === undefined) return 'invalid_event'
     // A background park holds no wake time and a scheduled park no deadline, and the router refuses the spare one.
