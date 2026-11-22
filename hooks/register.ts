@@ -32,7 +32,7 @@ export const register: Register = (on, options) => {
   // a later start's, and an earlier start whose GET is still out would act on its answer once it lands. The heartbeat
   // timer stays, its ticks doing nothing until a later start resolves settings.
   function deactivate(start: number): void {
-    if (start > cleared) cleared = start
+    cleared = Math.max(cleared, start)
     current = undefined
     clearSettings()
     emptyQueue()
