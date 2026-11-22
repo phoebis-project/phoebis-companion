@@ -7,7 +7,7 @@ import runB from './fixtures/run-b'
 import runC from './fixtures/run-c'
 import runE from './fixtures/run-e'
 import runH from './fixtures/run-h'
-import { commandDeadline, nextFireAt, parkOf } from './rules'
+import { commandDeadline, isRealPrompt, nextFireAt, parkOf } from './rules'
 import type { AgentRecord, Body, Cron } from './rules'
 import { fakeRouter, LEASE_MS, replay } from './testing'
 import type { FakeRouter, Reply } from './testing'
@@ -1671,6 +1671,7 @@ test('a subagent the registration answer restates with nothing open is released'
 
 test('a prompt from the composer, the sdk, the bridge or a Slack ping is an activity of kind prompt and other ' +
   'origins are not', CONFIGURED, async ($, on) => {
+    expect(ORIGINS.filter((kind) => isRealPrompt({ kind }))).toEqual(['bridge', 'composer', 'sdk', 'slack-ping'])
     const { clock, router } = host(on)
     await start($, clock)
     await complete($, clock)
