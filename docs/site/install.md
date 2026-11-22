@@ -67,7 +67,7 @@ access before a mod's first fetch, against `api.anthropic.com` with the credenti
 check, and every report and read is then refused inside the process. `CLAUDE_CODE_SUBSCRIPTION_TYPE=max` beside a router
 key in `CLAUDE_CODE_OAUTH_TOKEN` marks the session a consumer subscription, which no organization policy governs, so the
 check is skipped and the requests go out. Claude Code documents that variable nowhere. [The environment
-block](../router/client.md#the-environment-block) on The client carries it, and
+block](../router/client.md#the-environment-block) on the router's page The client carries it, and
 [`CLAUDE_CODE_SUBSCRIPTION_TYPE`](../router/client.md#claude_code_subscription_type) there says what the client does
 with it.
 

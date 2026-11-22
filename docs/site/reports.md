@@ -133,7 +133,7 @@ set sent holds a fact or where a report the router did not confirm is still owed
 record may be a new one. The mod cleans each value before it sends it: each run of line breaks and tabs folds to one
 space, control characters, format characters and unpaired surrogates go, the ends are trimmed, and a title past 256
 bytes is cut on a whole character. The router applies the same rules, and [the event's
-members](../router/relay.md#the-keepalive-protocol) are on The relay.
+members](../router/relay.md#the-keepalive-protocol) are on the router's page The relay.
 
 A facts report goes out behind each lifecycle report in the queue and waits under a backoff of its own, so a report the
 router refuses or cannot take costs the facts alone and never a heartbeat. A fact the person withdrew, by turning the
