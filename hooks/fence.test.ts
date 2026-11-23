@@ -19,7 +19,7 @@ const INSTANCE = 'PHOEBIS_KEEPALIVE_INSTANCE'
 const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const LOGS = { 'run-a': runA, 'run-b': runB, 'run-c': runC, 'run-e': runE, 'run-h': runH }
 // The time run-h's session started, as the clock a reloaded module finds.
-const RELOAD_AT = 1790937865035
+const RELOAD_AT = 1795442783684
 // What a module that loaded earlier in this process left behind: its header line, its variable and its state.
 const INHERITED = {
   ANTHROPIC_AUTH_TOKEN: KEY,

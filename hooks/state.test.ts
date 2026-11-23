@@ -16,7 +16,7 @@ const CONFIGURED = { options: { management_url: 'http://127.0.0.1:1' } }
 const KEY = 'k-test'
 const T0 = 1_790_000_000_000
 const LOGS = { 'run-a': runA, 'run-b': runB, 'run-c': runC, 'run-e': runE, 'run-h': runH }
-const SUBAGENT = 'a79c058078a9c7b86'
+const SUBAGENT = 'aa527667ce49d9bf3'
 
 // Each kind of the PromptOrigin union, which holds the origins of a submitted prompt. The list is complete as of the
 // declarations of Claude Code 2.1.299 and 2.1.328.
@@ -172,44 +172,45 @@ function cron(id: string, wakeAt: number): Cron {
 test('run-h: a background command parks main with its deadline, and the stop after its notification turn closes it',
   CONFIGURED, async ($, on) => {
     const { clock, router } = replayHost(on)
-    await replay($, on, lines(runH, 0, 44), clock, router)
+    await replay($, on, lines(runH, 0, 36), clock, router)
     expect(told(router)).toEqual([
       'session_start',
       'activity main prompt',
-      `state main parked background ${1790937877955 + 1800000}`,
+      `state main parked background ${1795442796401 + 1800000}`,
     ])
     // The notification's turn ends with a stop whose registry no longer runs the command.
-    await replay($, on, lines(runH, 44, 59), clock, router)
+    await replay($, on, lines(runH, 36, 51), clock, router)
     expect(told(router).slice(3)).toEqual(['state main busy', 'state main idle'])
   })
 
 test('run-h: a subagent starts under main, main parks on it without a deadline, and its turn end releases it',
   CONFIGURED, async ($, on) => {
     const { clock, router } = replayHost(on)
-    await replay($, on, lines(runH, 0, 59), clock, router)
+    await replay($, on, lines(runH, 0, 51), clock, router)
     const before = told(router).length
-    await replay($, on, lines(runH, 59, 79), clock, router)
+    await replay($, on, lines(runH, 51, 69), clock, router)
     expect(told(router).slice(before)).toEqual(['activity main prompt', `agent_start ${SUBAGENT}`])
-    await replay($, on, lines(runH, 79, 97), clock, router)
+    await replay($, on, lines(runH, 69, 91), clock, router)
     expect(told(router).slice(before + 2)).toEqual(['state main parked background'])
-    await replay($, on, lines(runH, 97, 104), clock, router)
+    await replay($, on, lines(runH, 91, 111), clock, router)
     expect(told(router).slice(before + 3)).toEqual([`state ${SUBAGENT} released`, 'state main idle'])
-    await replay($, on, lines(runH, 104, 115), clock, router)
+    await replay($, on, lines(runH, 111, 118), clock, router)
     expect(told(router).slice(before + 5)).toEqual(['state main busy', 'state main idle'])
   })
 
 test('run-a: a non interactive run reports both tasks, the subagent and its end', CONFIGURED, async ($, on) => {
   const { clock, router } = replayHost(on)
   await replay($, on, runA, clock, router)
-  const parked = `state main parked background ${1790937871788 + 1800000}`
+  const parked = `state main parked background ${1795442773359 + 1800000}`
   expect(told(router)).toEqual([
     'session_start',
     'activity main prompt',
-    'agent_start a7596ead013ce1281',
-    'state a7596ead013ce1281 released',
+    'agent_start a9544323d9962faf5',
+    'state main parked background',
+    'state a9544323d9962faf5 released',
     parked,
     'state main busy',
-    'state main idle',
+    parked,
     'state main busy',
     'state main idle',
     'session_end',
@@ -1724,13 +1725,13 @@ describe('unknown is never sent', () => {
   }
 })
 
-test('the agent id the mod reports is the one string the spawn, the steps, the completion and the notification carry',
+test('the agent id the mod reports is the one string the spawn, the steps, the completion and the hand-back carry',
   CONFIGURED, async ($, on) => {
     const { clock, router } = replayHost(on)
     await replay($, on, runH, clock, router)
     const agents = router.requests.flatMap((body) => 'agent_id' in body && body.agent_id !== 'main' ? [said(body)] : [])
     expect(agents).toEqual([`agent_start ${SUBAGENT}`, `state ${SUBAGENT} released`])
-    // The release took the id out of main's open set, so main ends idle after the notification's turn.
+    // The release took the id out of main's open set, so main ends idle after the turn that the hand-back starts.
     expect(states(router).at(-1)).toBe('state main idle')
   })
 

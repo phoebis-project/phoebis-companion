@@ -788,6 +788,7 @@ export async function replay($: Engine, _on: On, log: string, clock: MockClock, 
           tool_use_id: text(line.toolUseId),
           run_in_background: line.bg === true,
           command: '',
+          ...(typeof line.agentId === 'string' ? { agentId: line.agentId } : {}),
         } as Parameters<Engine['tool']['call']>[0])
         break
       }

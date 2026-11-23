@@ -22,9 +22,10 @@ unchanged, and its `.catch` passes the event on when the mod fails, so the mod r
 stop. The settings hooks on `config.set` refuse a Management URL as [Configure](install.md#configure) states and nothing
 else.
 
-`claude plugin test` runs the cases in `hooks/*.test.ts`. They replay the event logs under `hooks/fixtures/`, recorded
-from Claude Code sessions, and hand-built events where no log shows a row, against a stubbed router whose answers each
-case scripts, on a clock the case advances. No test opens a socket.
+`claude plugin test` runs the cases in `hooks/*.test.ts` (checked on Claude Code 2.1.299 and 2.1.328). They replay the
+event logs under `hooks/fixtures/`, recorded from sessions of Claude Code 2.1.287 and 2.1.328, and hand-built events
+where no log shows a row, against a stubbed router whose answers each case scripts, on a clock the case advances. No
+test opens a socket.
 
 A hooks module may import sibling files of the plugin (checked on Claude Code 2.1.319).
 

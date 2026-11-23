@@ -614,7 +614,7 @@ describe('session end is sent at once ahead of the queue and past the request in
     mock.env(on, { ANTHROPIC_AUTH_TOKEN: KEY })
     const clock = mock.clock(on)
     const router = fakeRouter(on, clock)
-    await replay($, on, lines(runH, 0, 128), clock, router)
+    await replay($, on, lines(runH, 0, 132), clock, router)
     router.answer(async (_body, ack) => {
       await clock.sleep(5000)
       return ok(ack)
@@ -623,11 +623,11 @@ describe('session end is sent at once ahead of the queue and past the request in
     await prompt($, clock, 'sdk')
     const before = router.requests.length
     expect(events(router).at(-1)).toBe('activity')
-    await replay($, on, lines(runH, 128, 129), clock, router)
+    await replay($, on, lines(runH, 132, 133), clock, router)
     expect(router.requests).toHaveLength(before + 1)
     const sent = router.requests.at(-1) as Body
     expect(sent.event).toBe('session_end')
-    expect(sent.session_id).toBe(JSON.parse(lines(runH, 128, 129)).sessionId)
+    expect(sent.session_id).toBe(JSON.parse(lines(runH, 132, 133)).sessionId)
     await clock.advance(60000)
     expect(router.requests).toHaveLength(before + 1)
   })
