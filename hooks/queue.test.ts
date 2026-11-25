@@ -213,6 +213,52 @@ test('a transport failure and a 5xx restore the report and back off one two four
     expect(events(router).slice(8)).toEqual(['activity', 'activity'])
   })
 
+const NOTES = { cwd: '/home/dev/notes', repo: null, root: '/home/dev/notes' }
+const PLACED = { options: { management_url: ROUTER_URL, report_project: true } }
+
+test('a facts request that never answers gives way to the due heartbeat once ten seconds have passed', PLACED,
+  async ($, on) => {
+    const { clock, router } = host(on, { place: NOTES })
+    // A lease of twelve seconds puts the heartbeat four seconds behind the registration.
+    router.answer((_body, ack) => ok({ ...ack, lease_expires_ms: clock.now() + 12_000 }))
+    router.answer(() => new Promise<Reply>(() => undefined))
+    await start($, clock)
+    await clock.advance(9_999)
+    expect(events(router)).toEqual(['session_start', 'session_facts'])
+    await clock.advance(1)
+    expect(events(router)).toEqual(['session_start', 'session_facts', 'heartbeat'])
+    expect(router.times).toEqual([T0, T0, T0 + 10_000])
+  })
+
+test('a facts request abandoned at ten seconds stays owed and goes out again though its 200 arrived late', PLACED,
+  async ($, on) => {
+    const { clock, router } = host(on, { place: NOTES })
+    router.answer((_body, ack) => ok(ack))
+    router.answer(async (_body, ack) => {
+      await clock.sleep(10_500)
+      return ok(ack)
+    })
+    // The retry gets no answer inside the case, so the late 200 is the one answer that could settle the set.
+    router.answer(() => new Promise<Reply>(() => undefined))
+    await start($, clock)
+    await clock.advance(11_000)
+    // Had the late 200 settled the set, the pump that sent the retry would have saved the work without the mark.
+    expect([...router.values.values()]).toContainEqual(expect.objectContaining({ factsOwed: true }))
+    expect(events(router)).toEqual(['session_start', 'session_facts', 'session_facts'])
+    expect(router.times).toEqual([T0, T0, T0 + 11_000])
+  })
+
+test('a heartbeat whose own request never answers is sent again behind ten seconds and the backoff', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    router.answer((_body, ack) => ok(ack))
+    router.answer(() => new Promise<Reply>(() => undefined))
+    await start($, clock)
+    await clock.advance(36_000)
+    expect(events(router)).toEqual(['session_start', 'heartbeat', 'heartbeat'])
+    expect(router.times).toEqual([T0, T0 + 25_000, T0 + 36_000])
+  })
+
 test('a fetch that throws writes one debug line naming the report and the error, and a 5xx writes none',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)

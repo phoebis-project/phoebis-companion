@@ -137,12 +137,13 @@ bytes is cut on a whole character. The router applies the same rules, and [the e
 members](../router/relay.md#the-keepalive-protocol) are on the router's page The relay.
 
 A facts report goes out behind each lifecycle report in the queue and waits under a backoff of its own, so a report the
-router refuses or cannot take costs the facts alone and never a heartbeat. A fact the person withdrew, by turning the
-option off, stays owed until the router confirms the report that clears it. Each registration until then sends that
-report again, also after a reload of the mod, since the mod keeps the last set it sent and the owed mark in the plugin's
-host state beside its tracked work. A router that does not know `session_facts` refuses each facts report with status
-400, and the mod drops it with one debug line and sends the set again only once it changes or the router acknowledges a
-registration.
+router refuses or cannot take costs the facts alone and never a heartbeat. A request with no answer within 10 seconds
+counts as a failed send: the report goes back into the queue under its backoff, and an answer that arrives later changes
+nothing. A fact the person withdrew, by turning the option off, stays owed until the router confirms the report that
+clears it. Each registration until then sends that report again, also after a reload of the mod, since the mod keeps the
+last set it sent and the owed mark in the plugin's host state beside its tracked work. A router that does not know
+`session_facts` refuses each facts report with status 400, and the mod drops it with one debug line and sends the set
+again only once it changes or the router acknowledges a registration.
 
 With Agent reports on, an `agent_facts` report carries a subagent's description, its type and its name, read from the
 spawn call and from then on from the client's agent list, and states the whole set as `session_facts` does. It goes out

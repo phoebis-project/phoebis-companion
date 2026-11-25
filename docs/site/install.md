@@ -72,10 +72,11 @@ block](../router/client.md#the-environment-block) on the router's page The clien
 with it.
 
 With Cache warming reports off, the mod sends no keepalive event, and the start check and the tool still run. The
-backoff, the heartbeat interval, the presence throttle, the start check's wait and the tool's cache are constants, and
-the mod has no other setting. A report that did not get through, for a transport failure, a 5xx or a limit, goes out
-again along a fixed backoff. A heartbeat goes out at a share of the remaining lease, within fixed bounds, and both
-figures are on [The relay](../router/relay.md#the-keepalive-protocol). A presence report goes out at most once a minute
+backoff, the heartbeat interval, the presence throttle, the request limit, the start check's wait and the tool's cache
+are constants, and the mod has no other setting. A report that did not get through, for a transport failure, a 5xx, a
+limit or no answer within the request limit of 10 seconds, goes out again along a fixed backoff. A heartbeat goes out at
+a share of the remaining lease, within fixed bounds, and both figures are on [The
+relay](../router/relay.md#the-keepalive-protocol). A presence report goes out at most once a minute
 ([Presence](reports.md#presence)).
 
 With Session title reports on, the mod reports the title a `/rename` gave the session, for the console's [Sessions

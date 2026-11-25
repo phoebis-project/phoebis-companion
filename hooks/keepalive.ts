@@ -49,6 +49,9 @@ const MODEL_REF = { plugin: 'phoebis-companion', key: 'model' } as const
 const IDENTITIES = 'identities'
 const KEPT_IDENTITIES = 8
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000]
+// A request with no answer by then counts as a failed send. Ten seconds leave five tries of a heartbeat inside one
+// lease of 90 seconds, and a shorter limit would send a report twice that was only slow.
+const REQUEST_LIMIT_MS = 10000
 
 type SessionRecord = {
   id: string
@@ -855,7 +858,21 @@ async function pump($: EngineInterface): Promise<void> {
     const body = buildBody(record, report, sentAt)
     let response: HttpResponse | undefined
     try {
-      response = await post($, config, body)
+      const sent = post($, config, body)
+      // The race is the one reader of the request, so an answer behind the limit reaches no settle. A rejection
+      // behind the limit is dropped on purpose: the race already holds it, and this handler says so at the call.
+      sent.catch(() => undefined)
+      // The limit's wait is a call that the host holds open, so it ends with the race and none outlives its request.
+      const limit = new AbortController()
+      try {
+        response = await Promise.race([
+          sent,
+          $.clock.sleep(REQUEST_LIMIT_MS, { signal: limit.signal }).then(() => undefined),
+        ])
+      } finally {
+        limit.abort()
+      }
+      if (response === undefined) throw new Error(`no answer within ${REQUEST_LIMIT_MS / 1000} seconds`)
     } catch (error) {
       // The client refuses a plugin's fetch inside the process when its policy check failed, and a refused host
       // throws the same way, so the one sign of either is this line: the backoff below retries all the same. The
