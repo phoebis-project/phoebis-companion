@@ -592,24 +592,23 @@ test('a prompt\'s read that ends first carries the registration\'s duty', PLACED
     .toEqual(['session_start', 'session_facts', 'session_start', 'session_facts'])
 })
 
-test('a read whose working directory moved under git counts for nothing', PLACED, async ($, on) => {
-  const { clock, router } = host(on, { place: STOREFRONT })
-  const first = heldGit(router)
-  router.answerGit(() => onBranch('feature/tax'))
-  await start($, clock)
-  router.setPlace(BILLING)
-  first(onBranch('main'))
-  await clock.settle()
-  expect(facts(router)).toEqual([])
-  await prompt($, clock)
-  expect(facts(router)).toEqual([{
-    branch: 'feature/tax',
-    cwd: '/home/dev/work/billing-service.worktrees/tax/api',
-    project: '/home/dev/work/billing-service.worktrees/tax',
-    repository: 'git.example/acme/billing-service',
-    repository_root: '/home/dev/work/billing-service',
-  }])
-})
+test('a read whose working directory moves while git is out sends the place it took with that place\'s branch',
+  PLACED, async ($, on) => {
+    const { clock, router } = host(on, { place: { ...STOREFRONT, branch: 'main' } })
+    router.delayGit(1000)
+    await start($, clock)
+    router.setPlace({ ...BILLING, branch: 'feature/tax' })
+    await clock.advance(1000)
+    expect(facts(router)).toEqual([{ ...STOREFRONT_FACTS, branch: 'main' }])
+    await prompt($, clock)
+    expect(facts(router)).toEqual([{ ...STOREFRONT_FACTS, branch: 'main' }, {
+      branch: 'feature/tax',
+      cwd: '/home/dev/work/billing-service.worktrees/tax/api',
+      project: '/home/dev/work/billing-service.worktrees/tax',
+      repository: 'git.example/acme/billing-service',
+      repository_root: '/home/dev/work/billing-service',
+    }])
+  })
 
 test('a set queued under one key does not go to the router a later start names with another', PLACED,
   async ($, on) => {
@@ -665,23 +664,6 @@ test('a set queued for one router URL does not go to the URL a later start names
       repository_root: '/home/dev/work/billing-service',
     }])
   })
-
-test('a move ahead of the directory\'s answer leaves the read with the new place whole', PLACED, async ($, on) => {
-  const { clock, router } = host(on, { place: STOREFRONT })
-  // The registration's read asks for the directory first, and the host answers it a second late, after a move.
-  router.delayCwd(1000)
-  router.answerGit(() => onBranch('feature/tax'))
-  await start($, clock)
-  router.setPlace(BILLING)
-  await clock.advance(1000)
-  expect(facts(router)).toEqual([{
-    branch: 'feature/tax',
-    cwd: '/home/dev/work/billing-service.worktrees/tax/api',
-    project: '/home/dev/work/billing-service.worktrees/tax',
-    repository: 'git.example/acme/billing-service',
-    repository_root: '/home/dev/work/billing-service',
-  }])
-})
 
 test('a spawn\'s facts follow its acknowledged start, and a workflow\'s agent sends none', AGENTS, async ($, on) => {
   const { clock, router } = host(on)

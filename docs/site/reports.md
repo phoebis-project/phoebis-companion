@@ -122,10 +122,11 @@ present directory, and the repository the `origin` remote reduced to `host/path`
 lower case: the scheme, the user information, the port, the query, the fragment, one trailing `.git` and each trailing
 slash are cut before the value leaves the machine, so no credential is sent. A `file` URL, a local path, a remote with
 an `@` behind its host part and each other remote the mod cannot read send no repository. The branch is read with
-`git symbolic-ref --short -q HEAD` in the session's working directory, at each read and only inside a repository, with a
-timeout of 2 seconds. A detached HEAD, a git call that fails, a host that runs no process, a missing git and the timeout
-send no branch, and a read during which the working directory changed sends nothing, so the next read reports the new
-place. A path or a reduced repository over 1,024 bytes and a branch over 256 bytes are left out.
+`git symbolic-ref --short -q HEAD` in the working directory that the same read took, at each read and only inside a
+repository, with a timeout of 2 seconds. A detached HEAD, a git call that fails, a host that runs no process, a missing
+git and the timeout send no branch. A read during which the working directory changed reports the place it took, with
+that place's branch, and the next read reports the new place. A path or a reduced repository over 1,024 bytes and a
+branch over 256 bytes are left out.
 
 A `session_facts` report states the whole set, so a fact that is gone is left out of the next report and the router
 clears it. The mod sends the set where it changed, and after each acknowledged registration where the set or the last

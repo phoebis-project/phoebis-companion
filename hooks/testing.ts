@@ -45,6 +45,8 @@ export type GetAnswer = (url: string, headers: Record<string, string>) => Reply 
 
 /** Where the fake host says the session stands. A member left out answers undefined. */
 export type FakePlace = {
+  /** The branch git prints in this place. Left out, git answers exit code 1 with no output, as on a detached HEAD. */
+  branch?: string
   cwd?: string
   /** `null` outside a repository, and `'rejects'` for a call that fails. */
   repo?: { remote: string | null; root: string } | null | 'rejects'
@@ -148,8 +150,9 @@ export type FakeRouter = {
   answerSpawn: (fn: () => { agentId: string } | Promise<{ agentId: string }>) => void
   /**
    * Scripts the next `$.process.run` whose vector starts with `git`, and several calls answer the next ones in turn.
-   * A function that answers a promise holds the call open until it settles. Without a script git answers exit code 1
-   * with no output, as it does on a detached HEAD.
+   * A function that answers a promise holds the call open until it settles. Without a script git answers the branch
+   * of the place whose `cwd` the call names, or of the present place where the call names none, and exit code 1 with
+   * no output where that place holds no branch.
    */
   answerGit: (fn: () => GitAnswer | Promise<GitAnswer>) => void
   /**
@@ -169,10 +172,10 @@ export type FakeRouter = {
    */
   delayEnvSet: (ms: number) => void
   /**
-   * Holds the next `$.session.cwd()` for this long on the clock, and it then answers the place as it stands, as a
-   * host answers a call after a move the person made meanwhile.
+   * Holds the next `$.process.run` whose vector starts with `git` for this long on the clock. It then answers for
+   * the place that the call names, as a host answers a call after a move the person made meanwhile.
    */
-  delayCwd: (ms: number) => void
+  delayGit: (ms: number) => void
   /** Holds the next `$.session.id()` for this long on the clock before it answers. */
   delayId: (ms: number) => void
   /** Holds the next `$.agent.list()` for this long on the clock before it answers. */
@@ -334,6 +337,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const spawns: (() => { agentId: string } | Promise<{ agentId: string }>)[] = []
   const gits: (() => GitAnswer | Promise<GitAnswer>)[] = []
   let place: FakePlace = options.place ?? {}
+  // Each place the session stood in, by its directory, so a git call that names one answers for it after a move.
+  const places = new Map<string, FakePlace>()
+  if (place.cwd !== undefined) places.set(place.cwd, place)
   const edits: (() => PromptEditResult)[] = []
   const submits: (() => PromptSubmitResult | Promise<PromptSubmitResult>)[] = []
   const envSetDenials: string[] = []
@@ -342,7 +348,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const modelWriteDenials: string[] = []
   const registerDenials: string[] = []
   let envSetDelayMs = 0
-  let cwdDelayMs = 0
+  let gitDelayMs = 0
   let idDelayMs = 0
   let listDelayMs = 0
   let modelDelayMs = 0
@@ -398,6 +404,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     setPlace: (next) => {
       place = next
+      if (next.cwd !== undefined) places.set(next.cwd, next)
     },
     answer: (fn) => {
       answers.push(fn)
@@ -423,8 +430,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     delayEnvSet: (ms) => {
       envSetDelayMs = ms
     },
-    delayCwd: (ms) => {
-      cwdDelayMs = ms
+    delayGit: (ms) => {
+      gitDelayMs = ms
     },
     delayId: (ms) => {
       idDelayMs = ms
@@ -556,10 +563,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   })
   on('session.cwd', () => {
     router.reached.push('session.cwd')
-    if (cwdDelayMs === 0) return { value: place.cwd as string }
-    const ms = cwdDelayMs
-    cwdDelayMs = 0
-    return clock.sleep(ms).then(() => ({ value: place.cwd as string }))
+    return { value: place.cwd as string }
   })
   on('session.root', () => {
     router.reached.push('session.root')
@@ -637,8 +641,19 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     router.reached.push('process.run')
     router.commands.push([...e.argv])
     if (e.argv[0] === 'git') {
+      if (gitDelayMs > 0) {
+        const ms = gitDelayMs
+        gitDelayMs = 0
+        await clock.sleep(ms)
+      }
       const scripted = gits.shift()
-      const answer = scripted === undefined ? { exitCode: 1, stdout: '' } : await scripted()
+      let answer: GitAnswer
+      if (scripted !== undefined) {
+        answer = await scripted()
+      } else {
+        const at = e.init?.cwd === undefined ? place : places.get(e.init.cwd)
+        answer = at?.branch === undefined ? { exitCode: 1, stdout: '' } : { exitCode: 0, stdout: `${at.branch}\n` }
+      }
       if ('reject' in answer) return { deny: answer.reject }
       return {
         value: {

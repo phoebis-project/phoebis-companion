@@ -908,12 +908,13 @@ async function guarded<T>(call: () => Promise<T>): Promise<T | undefined> {
   }
 }
 
-// The branch of the session's working directory. A detached HEAD, a host that runs no process, a missing git and the
-// timeout all answer none, since any other word would read as a branch's name.
-async function branchOf($: EngineInterface): Promise<string | undefined> {
+// The branch of the directory the read took, so a move while git is out pairs no place with another place's branch.
+// Where that read answered nothing, git runs in the session's present directory. A detached HEAD, a host that runs no
+// process, a missing git and the timeout all answer none, since any other word would read as a branch's name.
+async function branchOf($: EngineInterface, cwd: string | undefined): Promise<string | undefined> {
   return guarded(async () => {
     const { exitCode, stdout } = await $.process.run(['git', 'symbolic-ref', '--short', '-q', 'HEAD'],
-      { timeoutMs: 2000 })
+      { timeoutMs: 2000, ...(cwd === undefined ? {} : { cwd }) })
     return exitCode === 0 ? stdout.split('\n')[0] : undefined
   })
 }
@@ -927,9 +928,8 @@ async function readSessionFacts($: EngineInterface): Promise<void> {
   const read: SessionRead = {}
   if (factOptions.project) {
     // Each call is guarded on its own: a client that lacks one, or a call that rejects, costs that call's facts alone.
-    // The directory comes first, so a move at any point behind its answer shows in the directory read behind git.
-    const cwd = await guarded(() => $.session.cwd())
-    const [project, repo] = await Promise.all([
+    const [cwd, project, repo] = await Promise.all([
+      guarded(() => $.session.cwd()),
       guarded(() => $.session.root()),
       guarded(() => $.session.repo()),
     ])
@@ -938,12 +938,7 @@ async function readSessionFacts($: EngineInterface): Promise<void> {
     if (repo !== undefined && repo !== null) {
       read.repositoryRoot = repo.root
       read.remote = repo.remote
-      read.branch = await branchOf($)
-      // Git ran in the working directory of its own start. Where that is no longer the directory this read took, the
-      // branch may be another repository's, so the read counts for nothing and the next one gathers the new place
-      // whole.
-      const moved = await guarded(() => $.session.cwd())
-      if (moved !== cwd) return
+      read.branch = await branchOf($, cwd)
     }
   }
   if (factOptions.title && seenTitle?.id === record.id) read.title = seenTitle.title
