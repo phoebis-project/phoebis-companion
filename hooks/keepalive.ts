@@ -52,6 +52,10 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000]
 // A request with no answer by then counts as a failed send. Ten seconds leave five tries of a heartbeat inside one
 // lease of 90 seconds, and a shorter limit would send a report twice that was only slow.
 const REQUEST_LIMIT_MS = 10000
+// A write of a saved value that has not landed by then is abandoned. A pump waits for the write that runs and for
+// the one behind it, so a hung state call holds it ten seconds at most and, with a hung request behind it, a due
+// heartbeat twenty.
+const WRITE_LIMIT_MS = 5000
 
 type SessionRecord = {
   id: string
@@ -148,6 +152,8 @@ let factOptions: FactOptions = { agents: false, project: false, title: false }
 // The tracked work as the host last took it, so a pump writes it only when it changed.
 let savedModel: string | undefined
 let modelWrites: Promise<unknown> = Promise.resolve()
+// The link that waits to start. Each pump that asks meanwhile joins it.
+let nextWrite: Promise<void> | undefined
 // The reports already sent again under a generation the router named, so a second refusal drops them.
 const resent = new WeakSet<Report>()
 // The set of a run that ended before the router acknowledged its start, by the queued release that ends the run, so
@@ -729,21 +735,63 @@ function heldModelFor(held: unknown, id: string): SavedModel | undefined {
   return held as SavedModel
 }
 
-// The host completes its calls in no stated order, so each write of the tracked work settles before the next one
-// takes its snapshot, as the fence's writes do. An older snapshot that landed last would hold work since withdrawn,
-// and with `savedModel` naming a newer one, nothing would write again until the work changed.
-async function persistModel($: EngineInterface): Promise<void> {
-  const run = modelWrites.then(async () => {
-    if (session === undefined) return
-    const value = snapshotModel(session)
-    const text = JSON.stringify(value)
-    if (text === savedModel) return
-    await $.state.set(MODEL_REF, value)
+/**
+ * Follows one write of a saved value and answers once the host has answered it or the write limit has passed. The
+ * limit abandons a write and does not end it, so the host can land it behind a newer one. `landed` therefore runs in
+ * the handler on the host's own promise, for a landing in time and for a late one alike, so the saved texts change in
+ * the order of the host's answers. `late` runs behind it where the landing came behind the limit. A write that the
+ * host refuses changes nothing, in time or late.
+ */
+function followWrite($: EngineInterface, write: Promise<unknown>, landed: () => void,
+  late: () => void): Promise<void> {
+  let abandoned = false
+  // The limit's wait is a call that the host holds open, so it ends once the host has answered the write.
+  const limit = new AbortController()
+  const answered = write.then(() => {
+    landed()
+    if (abandoned) late()
+  }, () => undefined).finally(() => limit.abort())
+  return Promise.race([answered, $.clock.sleep(WRITE_LIMIT_MS, { signal: limit.signal }).then(() => {
+    abandoned = true
+  }, () => undefined)])
+}
+
+/**
+ * Runs where a write of a saved value that the limit abandoned has landed. The host can now hold a text that is not
+ * the present snapshot's, and one more pump writes the snapshot again. The landing acts for its own session alone: a
+ * pump writes ahead of each of its checks, so one started behind a move of the host would write this record's work
+ * into the state of another session.
+ */
+async function landedLate($: EngineInterface, record: SessionRecord, stale: () => boolean): Promise<void> {
+  const id = await guarded(() => $.session.id())
+  if (session !== record || record.stopped || id !== record.id) return
+  if (stale()) void pump($)
+}
+
+async function writeLink($: EngineInterface): Promise<void> {
+  const record = session
+  if (record === undefined) return
+  const value = snapshotModel(record)
+  const text = JSON.stringify(value)
+  if (text === savedModel) return
+  await followWrite($, $.state.set(MODEL_REF, value), () => {
     savedModel = text
+  }, () => void landedLate($, record, () => JSON.stringify(snapshotModel(record)) !== text))
+}
+
+// The host completes its calls in no stated order, so one link of the chain runs at a time, and the next one takes its
+// snapshot when it starts. An older snapshot that landed last would hold work since withdrawn. A pump that asks while a
+// link waits joins it, so a pump waits for two links at most, whatever the count of pumps ahead.
+function persistModel($: EngineInterface): Promise<void> {
+  if (nextWrite !== undefined) return nextWrite
+  const link = modelWrites.then(() => {
+    nextWrite = undefined
+    return writeLink($)
   })
-  // A write that rejects must not stall the ones after it.
-  modelWrites = run.catch(() => undefined)
-  await run
+  nextWrite = link
+  // A link that rejects must not stall the ones after it.
+  modelWrites = link.catch(() => undefined)
+  return link
 }
 
 // The host keeps its state per session, and a clear or a resume raises no start, so no fence writes the pair under an

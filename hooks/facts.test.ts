@@ -95,6 +95,13 @@ const WORKER_RELEASED = [
   { agent_id: 'main', state: 'busy', request_generation: 1 },
   { agent_id: 'worker-1', state: 'released', request_generation: 2 },
 ]
+const BUSY_MODEL = {
+  id: 'session-a',
+  agents: [{ id: 'main', state: 'busy', open: [], lastPresence: 0 }],
+  crons: [],
+  released: [],
+  routerReleased: [],
+}
 
 const ok = (body: unknown): Reply => ({ status: 200, body })
 const refusal = (code: string, extra: Record<string, unknown> = {}): Reply =>
@@ -172,6 +179,11 @@ function agentFacts(router: FakeRouter): Record<string, unknown>[] {
 // The entry the saved model holds for one agent.
 function savedAgent(router: FakeRouter, id: string): unknown {
   return (router.values.get('model') as { agents: { id: string }[] }).agents.find((agent) => agent.id === id)
+}
+
+// How many `$.state.set` calls reached the host.
+function stateWrites(router: FakeRouter): number {
+  return router.reached.filter((op) => op === 'state.set').length
 }
 
 // Holds the next spawn's answer open, and answers the function that ends it with the id the client gives the agent.
@@ -362,11 +374,12 @@ test('a write of the tracked work the host refuses is written again by the next 
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
     await start($, clock)
-    // Main's turn end changes the work, and the host refuses its write, so the pump that issued it sends nothing.
+    // Main's turn end changes the work, and the host refuses its write. The pump that issued it sends the state all the
+    // same.
     router.denyModelWrite('the host refuses the write')
     await complete($, clock)
-    expect(events(router)).toEqual(['session_start'])
-    // The heartbeat's pump finds the work unchanged since the refused write.
+    expect(events(router)).toEqual(['session_start', 'state'])
+    // The pump behind the state's answer found the work unwritten and wrote it again.
     await clock.advance(25000)
     expect(events(router)).toEqual(['session_start', 'state', 'heartbeat'])
     expect(router.values.get('model')).toEqual({
@@ -376,6 +389,99 @@ test('a write of the tracked work the host refuses is written again by the next 
       released: [],
       routerReleased: [],
     })
+  })
+
+test('a host that refuses each write of the tracked work still gets the registration and the due heartbeat',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    router.denyModelWrites('the host refuses the write')
+    await start($, clock)
+    await clock.advance(25_000)
+    expect(events(router)).toEqual(['session_start', 'heartbeat'])
+    // The host took no write, so the reports went out past a refusal and not behind a write that landed.
+    expect(router.values.get('model')).toBeUndefined()
+  })
+
+test('a write of the tracked work that never settles holds the due heartbeat for five seconds', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    await clock.advance(24_000)
+    // Main's turn end changes the work a second ahead of the heartbeat, and the host never answers its write.
+    router.delayModelWrite(600_000)
+    await complete($, clock)
+    await clock.advance(4_999)
+    expect(events(router)).toEqual(['session_start'])
+    await clock.advance(1)
+    expect(events(router)).toEqual(['session_start', 'state', 'heartbeat'])
+    expect(router.times).toEqual([T0, T0 + 29_000, T0 + 29_000])
+  })
+
+test('a write of the tracked work abandoned at five seconds that the host lands behind a newer one does not stay',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    // Main's turn end writes main idle, and the host holds that write past the limit.
+    const landIdle = router.holdModelWrite()
+    await complete($, clock)
+    await clock.advance(5000)
+    // The prompt turns main busy again, and the host holds that write too.
+    const landBusy = router.holdModelWrite()
+    // The prompt's report gets no answer. A pump behind that answer would find the busy work unwritten and write it
+    // again, and the case would pass without the step that follows a late landing.
+    router.answer(() => new Promise<Reply>(() => undefined))
+    await prompt($, clock)
+    // The host lands both in one step, the newer one first, so the abandoned write is the last to land.
+    landBusy()
+    landIdle()
+    await clock.settle()
+    expect(router.values.get('model')).toEqual(BUSY_MODEL)
+  })
+
+test('a host whose writes of the tracked work each land behind the limit comes to rest', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    // Each write lands six seconds behind its call, a second behind the limit.
+    router.delayModelWrites(6000)
+    await start($, clock)
+    await clock.advance(20_000)
+    const writes = stateWrites(router)
+    // The heartbeats of the next minute find no work that the host has not taken.
+    await clock.advance(60_000)
+    expect(stateWrites(router)).toBe(writes)
+  })
+
+test('pumps that ask while a write of the tracked work is held share one more write', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    // No write settles and the registration gets no answer, so nothing but a pump that asks starts a write.
+    router.delayModelWrites(600_000)
+    router.answer(() => new Promise<Reply>(() => undefined))
+    await start($, clock)
+    for (let asked = 0; asked < 4; asked += 1) await step($, clock)
+    // The start's write gives way at five seconds, and one more write serves the four steps.
+    await clock.advance(6_000)
+    const writes = stateWrites(router)
+    // The window ends ahead of the registration's own limit, behind which a pump asks again.
+    await clock.advance(8_000)
+    expect(stateWrites(router)).toBe(writes)
+  })
+
+test('an abandoned write of the tracked work that lands after the host left its session starts no write',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    // Main's turn end writes main idle, the host holds that write seven seconds, and the prompt at five seconds turns
+    // main busy again, so the late landing leaves the host with work since withdrawn.
+    router.delayModelWrite(7000)
+    await complete($, clock)
+    await clock.advance(5000)
+    await prompt($, clock)
+    // The host moves to another session with no start and no prompt under it, so the module still holds the record.
+    router.setId('session-b')
+    const writes = stateWrites(router)
+    await clock.advance(2000)
+    expect(stateWrites(router)).toBe(writes)
   })
 
 test('a clear owed at a reload goes out at the registration', CONFIGURED, async ($, on) => {

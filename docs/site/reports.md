@@ -54,10 +54,11 @@ arrives after a `/clear` or a `/resume` replaced the session is dropped. A tool 
 after such a replacement is dropped the same way: the work belongs to the session that started it.
 
 The mod writes its tracked work, each agent's open set, the session's crons, the subagents it released and those the
-router last named released, to the plugin's host state whenever it changes. A hot reload of the module in the same
-session reads it back before the registration's answer is reconciled, so a park the router holds is kept rather than
-replaced with a fresh busy main, the commands and crons the earlier load tracked still close and fire, and a released
-subagent stays released. A new session id starts from nothing.
+router last named released, to the plugin's host state whenever it changes. A write that the host refuses, or does not
+finish within 5 seconds, holds no report back, and the mod writes the work again with its next send. A hot reload of the
+module in the same session reads it back before the registration's answer is reconciled, so a park the router holds is
+kept rather than replaced with a fresh busy main, the commands and crons the earlier load tracked still close and fire,
+and a released subagent stays released. A new session id starts from nothing.
 
 ## Parks
 
