@@ -1,7 +1,7 @@
 import type { EngineInterface, PluginOptions } from 'claude-code'
 
 // The settings layer and the helpers the two hooks modules share. keepalive.ts and allowance.ts both import it, so the
-// allowance tool, which runs with the keepalive switch off, depends on nothing in the lifecycle.
+// allowance tool, which runs with the reports switched off, depends on nothing in the lifecycle.
 
 const CREDENTIAL = 'a URL with a username or password'
 const FRAGMENT = 'a URL with a fragment'
@@ -14,7 +14,7 @@ export type FactOptions = { agents: boolean; project: boolean; title: boolean }
 type Options = {
   managementUrl: string
   token: string
-  keepalive: boolean
+  reports: boolean
   notifications: boolean
   facts: FactOptions
 }
@@ -64,7 +64,7 @@ export function optionsOf(options: PluginOptions): Options {
   return {
     managementUrl: typeof options.management_url === 'string' ? options.management_url : '',
     token: typeof options.token === 'string' ? options.token : '',
-    keepalive: flag(options.keepalive, true),
+    reports: flag(options.reports, true),
     notifications: flag(options.notifications, true),
     facts: {
       agents: flag(options.report_agents, false),

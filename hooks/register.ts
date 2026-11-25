@@ -39,7 +39,7 @@ export const register: Register = (on, options) => {
     retireStarts()
   }
 
-  if (config.keepalive) {
+  if (config.reports) {
     // Only a 401 says the router refused the key, which both routes share. A 403 refuses one request, from something in
     // front of the router, and says nothing about whether the key may read the allowance, which the tool's own route
     // answers. A start that has not yet installed its settings holds settings of its own, so a refusal of the settings
@@ -118,7 +118,7 @@ export const register: Register = (on, options) => {
       // A later start that set or cleared current during the check owns the configuration, and a refused key cleared
       // it inside the check, so this start leaves it.
       if (outcome === 'stale' || current !== resolution.settings) return next(e)
-      if (config.keepalive) {
+      if (config.reports) {
         await startKeepalive($, resolution.settings, () => current === resolution.settings)
       }
       return next(e)

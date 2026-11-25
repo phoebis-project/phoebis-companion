@@ -140,7 +140,7 @@ test('a reload whose start GET fails answers the error text, not the earlier bod
 })
 
 test('a call GET that lands after a later start under another URL refilled the cache leaves the later body cached',
-  { options: { keepalive: false } }, async ($, on) => {
+  { options: { reports: false } }, async ($, on) => {
     const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY], ['ANTHROPIC_BASE_URL', ROUTER]])
     on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
     const clock = mock.clock(on, { now: T0 })
@@ -410,7 +410,7 @@ test('a start that resolves no key after a later start began leaves the later co
   })
 
 test('a call whose session id read a later start overtook reads under the later start\'s URL',
-  { options: { keepalive: false } }, async ($, on) => {
+  { options: { reports: false } }, async ($, on) => {
     const variables = new Map([['ANTHROPIC_AUTH_TOKEN', KEY], ['ANTHROPIC_BASE_URL', ROUTER]])
     on('env.get', (_$, e) => ({ value: variables.get(e.name) }))
     const clock = mock.clock(on, { now: T0 })

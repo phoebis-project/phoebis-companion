@@ -8,7 +8,7 @@ import type { FakeRouter } from './testing'
 const ROUTER = 'http://127.0.0.1:8317'
 const KEY = 'k-test'
 const CONFIGURED = { options: { management_url: ROUTER } }
-const CONFIGURED_OFF = { options: { management_url: ROUTER, keepalive: false } }
+const CONFIGURED_OFF = { options: { management_url: ROUTER, reports: false } }
 
 const UNSET: Parameters<typeof resolveSettings>[0] = {
   managementUrl: '',
@@ -151,7 +151,7 @@ test('a start that finds no router key leaves nothing reported under the setting
     ])
   })
 
-test('keepalive off sends no session_start while the allowance GET still goes out', CONFIGURED_OFF,
+test('Session reports off sends no session_start while the allowance GET still goes out', CONFIGURED_OFF,
   async ($, on) => {
     const { clock, router } = host(on)
     await start($, clock)

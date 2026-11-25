@@ -13,7 +13,7 @@ Code shows each of the mod's transcript lines under the mod's name.
 | `401` | Writes `phoebis-companion: the router at <url> refused the key (401), so this session reports nothing` to the transcript, registers no tool, and empties the keepalive queue, as a `401` on the keepalive route does. |
 | anything else | Registers the tool and then writes `phoebis-companion: no answer from the router at <url> (<status, failure or "not the allowance">), the allowance tool answers once it is back` to the transcript. Where Claude Code refuses the registration, the line ends on `and the engine refused the allowance tool, so this start registered none` in place of its last clause. |
 
-The lifecycle reports of the `403` row go out while the setting Cache warming reports is on
+The lifecycle reports of the `403` row go out while the setting Session reports is on
 ([Configure](install.md#configure)).
 
 The last row covers a transport failure, a `5xx`, another `4xx`, the three-second limit, and a `200` whose body is not

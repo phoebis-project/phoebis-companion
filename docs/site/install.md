@@ -29,7 +29,7 @@ one:
 | --- | --- | --- |
 | Management URL (`management_url`): where to report and to read | empty | `ANTHROPIC_BASE_URL` |
 | Router key (`token`): the key, kept in Claude Code's secure storage | empty | `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN` |
-| Cache warming reports (`keepalive`): whether the lifecycle reports go out | on | none |
+| Session reports (`reports`): whether the mod reports the session, its agents and their states | on | none |
 | Start check toasts (`notifications`): whether a start check's transcript line also raises a toast | on | none |
 | Agent reports (`report_agents`): whether each subagent's description, type and name are reported | off | none |
 | Project reports (`report_project`): whether the project directory, the repository and the branch are reported | off | none |
@@ -71,20 +71,19 @@ block](../router/client.md#the-environment-block) on the router's page The clien
 [`CLAUDE_CODE_SUBSCRIPTION_TYPE`](../router/client.md#claude_code_subscription_type) there says what the client does
 with it.
 
-With Cache warming reports off, the mod sends no keepalive event, and the start check and the tool still run. The
-backoff, the heartbeat interval, the presence throttle, the request limit, the start check's wait, the tool's cache and
-the write limit are constants, and the mod has no other setting. A report that did not get through, for a transport
-failure, a 5xx, a limit or no answer within the request limit of 10 seconds, goes out again along a fixed backoff. A
-heartbeat goes out at a share of the remaining lease, within fixed bounds, and both figures are on [The
+With Session reports off, the mod sends no report, and the start check and the tool still run. The backoff, the
+heartbeat interval, the presence throttle, the request limit, the start check's wait, the tool's cache and the write
+limit are constants, and the mod has no other setting. A report that did not get through, for a transport failure, a
+5xx, a limit or no answer within the request limit of 10 seconds, goes out again along a fixed backoff. A heartbeat goes
+out at a share of the remaining lease, within fixed bounds, and both figures are on [The
 relay](../router/relay.md#the-keepalive-protocol). A presence report goes out at most once a minute
 ([Presence](reports.md#presence)).
 
 With Session title reports on, the mod reports the title a `/rename` gave the session, for the console's [Sessions
-view](../router/console.md#sessions). The option needs Cache warming reports on. Turned off, it clears the title it
-reported at the next start of the session ([Reported facts](reports.md#reported-facts)). With Project reports on, the
-mod reports the branch, the project directory, the repository as `host/path`, the repository's root and the working
-directory of the session. This option needs Cache warming reports on too. Turned off, it clears what it reported at the
-next start of the session. With Agent reports on, the mod reports each subagent's description, its type and its name. It
-needs Cache warming reports on as well and clears what it reported once it is turned off. Each of these options works on
-every client the mod loads on, and where a client lacks what a fact is read from, the mod leaves that fact out and
-reports the rest.
+view](../router/console.md#sessions). The option needs Session reports on. Turned off, it clears the title it reported
+at the next start of the session ([Reported facts](reports.md#reported-facts)). With Project reports on, the mod reports
+the branch, the project directory, the repository as `host/path`, the repository's root and the working directory of the
+session. This option needs Session reports on too. Turned off, it clears what it reported at the next start of the
+session. With Agent reports on, the mod reports each subagent's description, its type and its name. It needs Session
+reports on as well and clears what it reported once it is turned off. Each of these options works on every client the
+mod loads on, and where a client lacks what a fact is read from, the mod leaves that fact out and reports the rest.
