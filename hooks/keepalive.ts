@@ -773,6 +773,9 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
   // its tracked work. A new id is a new conversation, so nothing the old one had open or scheduled carries over. Read
   // before the session moves, so a pump during the read never writes the old session's work under the new id.
   const held = heldModelFor((await $.state.get(MODEL_REF)).value, id)
+  // The host can leave the session while the read above is out and begin no transition, since a clear or a resume
+  // raises no start. The session this caller read is then one the host left, so it installs nothing.
+  if (await $.session.id() !== id) return true
   // The host answers its calls in no stated order, so a transition of another id that began behind this one read the
   // host's id later and holds the session the host is in, whichever read of the held work lands last. One of the same
   // id moves the record as this one does, so the first to land installs it and the other finds it kept.
@@ -1413,7 +1416,11 @@ export async function startKeepalive($: EngineInterface, resolved: Settings, isC
   if (!isCurrent()) return
   identity = pair
   bashBounds = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
-  await ensureSession($, isCurrent)
+  // An overtaken call read a session that the host has left, and the module can still hold the record of an
+  // earlier one, which the registration below would send under these settings. So the start reads the session
+  // again until a call installs or keeps a record. Each overtaken answer takes a move of the host, so this ends.
+  let overtaken = await ensureSession($, isCurrent)
+  while (overtaken) overtaken = await ensureSession($, isCurrent)
   // A later session start can land during these awaits, and the settings it set or cleared must stand.
   if (!isCurrent()) return
   // One step with no await, so no report goes out under these settings ahead of the registration. Its acknowledgment

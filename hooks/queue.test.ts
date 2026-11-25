@@ -840,6 +840,28 @@ test('a start under a new id never registers the old id a pump finds first', CON
   ])
 })
 
+test('a start whose session the host left while it read the held work registers the session the host is in',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    router.answer(() => ({ status: 401 }))
+    await start($, clock)
+    // The refusal leaves the end nothing to report, so the record under session-a is never marked ended.
+    await end($, clock, 'other', 'session-a')
+    router.setId('session-b')
+    // The start under session-b reads the held work a second late, and the host moves to session-c meanwhile with
+    // no start and no prompt under it.
+    router.delayModel(1000)
+    const starting = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    router.setId('session-c')
+    await clock.advance(1000)
+    await starting
+    await clock.settle()
+    expect(router.requests.slice(1).map((body) => [body.event, body.session_id])).toEqual([
+      ['session_start', 'session-c'],
+    ])
+  })
+
 test('a start superseded while it waits never revives the session that ended meanwhile', CONFIGURED,
   async ($, on) => {
     const { clock, router } = host(on)
@@ -883,6 +905,27 @@ test('a prompt whose read of the held work lands behind a later session\'s start
     // The prompt was typed into session-b, so session-c gets no activity for it.
     expect(router.requests.filter((body) => body.session_id === 'session-c').map((body) => body.event))
       .toEqual(['session_start', 'agent_start'])
+  })
+
+test('a prompt whose read of the held work lands after the host left its session registers nothing for it',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    await end($, clock, 'clear', 'session-a')
+    router.setId('session-b')
+    // The prompt typed into session-b reads the held work two seconds late, and the host moves to session-c
+    // meanwhile with no start and no prompt under it.
+    router.delayModel(2000)
+    const prompting = $.prompt.submit({ text: 'hi', origin: { kind: 'composer' }, wait: false })
+    await clock.settle()
+    router.setId('session-c')
+    await clock.advance(2000)
+    await prompting
+    await clock.settle()
+    expect(router.requests.map((body) => [body.event, body.session_id])).toEqual([
+      ['session_start', 'session-a'],
+      ['session_end', 'session-a'],
+    ])
   })
 
 test('a prompt and a start of one new id whose reads of the held work overlap file the prompt under that id',
