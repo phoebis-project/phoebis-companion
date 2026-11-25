@@ -102,6 +102,17 @@ const BUSY_MODEL = {
   released: [],
   routerReleased: [],
 }
+// What a load with Agent reports off left while a subagent ran: the agent's entry holds no set.
+const WORKER_MODEL = {
+  id: 'session-a',
+  agents: [
+    { id: 'main', state: 'busy', open: [{ id: 'worker-1', kind: 'subagent' }], lastPresence: 0 },
+    { id: 'worker-1', parent: 'main', state: 'busy', open: [], lastPresence: 0 },
+  ],
+  crons: [],
+  released: [],
+  routerReleased: [],
+}
 
 const ok = (body: unknown): Reply => ({ status: 200, body })
 const refusal = (code: string, extra: Record<string, unknown> = {}): Reply =>
@@ -836,6 +847,35 @@ test('a tick sends an agent\'s facts where the client\'s list changed them, and 
     expect(agentFacts(router)).toEqual([REVIEWER_FACTS, changed])
     await clock.advance(25000)
     expect(agentFacts(router)).toEqual([REVIEWER_FACTS, changed])
+  })
+
+test('agent reports turned on by a reload send a running subagent\'s set from the list at the registration', AGENTS,
+  async ($, on) => {
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: WORKER_MODEL } })
+    router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW }])
+    router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
+    await start($, clock)
+    expect(agentFacts(router)).toEqual([REVIEWER_FACTS])
+  })
+
+test('an agent that ends and starts again while the registration reads the list keeps the set of its new run',
+  AGENTS, async ($, on) => {
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: WORKER_MODEL } })
+    router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW }])
+    router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
+    // The registration's read of the list is out for a second.
+    router.delayList(1000)
+    await start($, clock)
+    // Meanwhile the run ends, which the list shows, and the agent starts again under its id with another task. The
+    // held read then answers the row of the run that ended.
+    router.setAgents([{ id: 'worker-1', status: 'completed', ...REVIEWER_ROW }])
+    await complete($, clock, 'worker-1')
+    router.answerSpawn(() => ({ agentId: 'worker-1' }))
+    await spawn($, clock, { ...REVIEWER, description: 'Review the export job' })
+    await clock.advance(1000)
+    expect(agentFacts(router)).toEqual([{
+      agent_id: 'worker-1', agent_type: 'code-reviewer', description: 'Review the export job', name: 'reviewer',
+    }])
   })
 
 test('an option turned off clears each announced agent\'s facts at the reload\'s registration', CONFIGURED,

@@ -118,6 +118,10 @@ type Model = {
 
 type FactsSlot<T> = { factsQueued: T | undefined; factsOwed: boolean }
 
+// The client's list as a registration read it, with the subagents the mod held when it asked. The answer arrives
+// later, and an agent can end and start again under its id meanwhile, so a row counts for the record that asked.
+type Listed = { rows: AgentInfo[]; asked: AgentRecord[] }
+
 const ENDED = new Set(['completed', 'failed', 'killed'])
 const LIVE = new Set(['idle', 'pending', 'running', 'waiting'])
 const WAKEUP = 'wakeup:'
@@ -588,9 +592,16 @@ function restate(agent: AgentRecord): void {
 // The registration's answer names every agent the router holds. Each side learns what the other lacks: an agent
 // only the router holds is rebuilt from the client's list or released, a state or a park the router holds wrongly
 // is sent again, and an agent only the mod holds is announced with its state.
-function reconcileAck(entries: AnsweredAgent[], listed: AgentInfo[] | undefined): void {
+function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): void {
   const held = new Map(entries.map((entry) => [entry.agent_id, entry]))
-  const client = listed === undefined ? undefined : new Map(listed.map((agent) => [agent.id, agent]))
+  const client = listed === undefined ? undefined : new Map(listed.rows.map((agent) => [agent.id, agent]))
+  // A reload holds each agent's set as the earlier load saved it, and no spawn fires again. The list's row is the
+  // present source, as at a tick, so the whole sends behind this answer carry it. A record that took the place of
+  // one the list was asked for is another run, which the row does not describe.
+  for (const agent of listed?.asked ?? []) {
+    const info = model.agents.get(agent.id) === agent ? client?.get(agent.id) : undefined
+    if (info !== undefined) agent.facts = listedFacts(info)
+  }
   const live: AgentInfo[] = []
   for (const [id, { state, park }] of held) {
     if (state === 'released') continue
@@ -936,11 +947,15 @@ async function pump($: EngineInterface): Promise<void> {
       }
     }
     let now: number
-    let listed: AgentInfo[] | undefined
+    let listed: Listed | undefined
     try {
       now = await $.clock.now()
       // The registration's answer is reconciled against the client's agents, read while nothing else can be sent.
-      if (report.event === 'session_start' && response?.ok === true) listed = await agentList($)
+      if (report.event === 'session_start' && response?.ok === true) {
+        const asked = [...model.agents.values()].filter((agent) => agent.id !== MAIN)
+        const rows = await agentList($)
+        if (rows !== undefined) listed = { rows, asked }
+      }
     } finally {
       queue.inFlight = undefined
     }
@@ -1126,7 +1141,7 @@ function answerOf(text: string): Answer {
 }
 
 function settle($: EngineInterface, config: Settings, record: SessionRecord, report: Report,
-  response: HttpResponse | undefined, now: number, listed: AgentInfo[] | undefined): void {
+  response: HttpResponse | undefined, now: number, listed: Listed | undefined): void {
   const repeated = startRefusal
   startRefusal = undefined
   // The router's agent limit refuses one agent's start, not the session: that agent waits under its own retry time
@@ -1198,7 +1213,7 @@ function deferAgent($: EngineInterface, agent: string, now: number): void {
 }
 
 function acknowledged($: EngineInterface, record: SessionRecord, report: Report, ack: Answer,
-  now: number, listed: AgentInfo[] | undefined): void {
+  now: number, listed: Listed | undefined): void {
   // Only these two reports renew the router's lease, so only their answers move the heartbeat.
   if ((report.event === 'session_start' || report.event === 'heartbeat') && ack.lease_expires_ms !== undefined) {
     const at = now + heartbeatInterval(ack.lease_expires_ms, now)
