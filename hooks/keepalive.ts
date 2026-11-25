@@ -1096,9 +1096,11 @@ function settle($: EngineInterface, config: Settings, record: SessionRecord, rep
     clearSettings()
     emptyQueue()
     timer?.cancel()
+    // The handler runs ahead of the line: a log call that throws would otherwise leave the allowance tool reading
+    // under a key the router refused.
+    onRefused(response.status, config)
     say($, `a report was refused with status ${response.status}, so this process reports nothing until a ` +
       'start\'s check no longer refuses the key', { to: 'debug' })
-    onRefused(response.status, config)
     return
   }
   if (response.status === 409) {
