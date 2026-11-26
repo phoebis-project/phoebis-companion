@@ -1,6 +1,5 @@
 import type {
   AgentInfo,
-  ClassicEventOf,
   EngineInterface,
   Frozen,
   HttpResponse,
@@ -9,17 +8,30 @@ import type {
   ToolCallInput,
 } from 'claude-code'
 import type {
-  AgentFactSet,
   Identity,
   SavedAgent,
-  SavedAgentFacts,
   SavedFacts,
   SavedModel,
   SavedTask,
-  SessionFactSet,
 } from '../types'
-import { agentFactSet, sameFacts, sessionFactSet } from './fact-rules'
-import type { SessionRead } from './fact-rules'
+import {
+  agentJoined,
+  agentLeft,
+  agentListed,
+  agentRefused,
+  agentReport,
+  agentSpawned,
+  closingSet,
+  installFacts,
+  readSession,
+  registrationAcknowledged,
+  reportedKinds,
+  resetFacts,
+  restoreFacts,
+  savedFacts,
+  sessionReport,
+  settled,
+} from './facts'
 import {
   agentOf,
   collapse,
@@ -41,8 +53,8 @@ import {
   sameAgent,
   samePark,
 } from './rules'
-import type { AgentRecord, Body, Cron, FactKind, Park, Report } from './rules'
-import { bearer, errorText, parsed, redactSecrets, say } from './settings'
+import type { AgentRecord, Body, Cron, Park, Report } from './rules'
+import { bearer, errorText, guarded, parsed, redactSecrets, say } from './settings'
 import type { FactOptions, Settings } from './settings'
 
 const MAIN = 'main'
@@ -81,9 +93,6 @@ type SessionRecord = {
   // A start refused for a live holder told the person it waits, so the takeover that ends the wait is told once too.
   conflicted?: boolean
   heartbeatAt?: number
-  // An acknowledged registration leaves the duty to send the session's facts whole, since the router's record may be
-  // a new one. It stands until a session read that counts takes it.
-  factsDue: boolean
 }
 
 type Backoff = { attempt: number; retryAt?: number }
@@ -115,14 +124,7 @@ type Model = {
   // The subagents this run released, until the client spawns one again or gives it a turn: a registration's answer
   // that still names one of them describes the run the release ends, so the client's list does not re-adopt it.
   released: Set<string>
-  // The session's set as last queued, whatever the router answered, so a set the router refused goes out again only
-  // once it changes or a registration is acknowledged.
-  factsQueued: SessionFactSet | undefined
-  // A set queued that the router has not answered for good, so a registration sends it again, an empty one too.
-  factsOwed: boolean
 }
-
-type FactsSlot<T> = { factsQueued: T | undefined; factsOwed: boolean }
 
 // The client's list as a registration read it, with the subagents the mod held when it asked. The answer arrives
 // later, and an agent can end and start again under its id meanwhile, so a row counts for the record that asked.
@@ -158,7 +160,6 @@ type RefusalHandler = (status: number, under: Settings) => void
 // The start hook holds the settings the allowance tool reads under, so it decides what a refusal does to them.
 let onRefused: RefusalHandler = () => undefined
 
-let factOptions: FactOptions = { agents: false, project: false, title: false }
 // The Cache warming option, which each registration carries. Nothing else in the mod reads it: the router decides
 // what it warms.
 let cacheWarming = true
@@ -172,18 +173,10 @@ let modelWrites: Promise<unknown> = Promise.resolve()
 let nextWrite: Promise<void> | undefined
 // The reports already sent again under a generation the router named, so a second refusal drops them.
 const resent = new WeakSet<Report>()
-// The set of a run that ended before the router acknowledged its start, by the queued release that ends the run, so
-// that acknowledgment puts it right ahead of that release. A later run of the agent ends under a release of its own.
-const closingSets = new WeakMap<Report, AgentFactSet>()
 // The agents' sets sent once. A set that failed as an ordinary one stands at the queue's head, where its agent's
 // release can queue right behind it, so it counts as tried as a closing set does.
 const agentFactsTried = new WeakSet<Report>()
 const model: Model = freshModel()
-// The title the client last named for a session, with that session's id: a title counts only for its own session.
-let seenTitle: { id: string; title: string | undefined } | undefined
-// Counts the session reads, so a read that finishes behind a later one changes nothing.
-let factReads = 0
-let factReadsDone = 0
 // Counts the transitions of the session record that began, with the id the newest one read, so one that another
 // session's transition overtook while it read the held work moves nothing.
 let transitions = 0
@@ -240,9 +233,10 @@ function live(): boolean {
 
 function freshRecord(id: string, state: AgentRecord['state'], parent?: string): AgentRecord {
   const record: AgentRecord = {
-    id, state, open: new Map(), lastPresence: 0, facts: {}, factsQueued: undefined, factsOwed: false,
+    id, state, open: new Map(), lastPresence: 0,
   }
   if (parent !== undefined) record.parent = parent
+  agentJoined(id)
   return record
 }
 
@@ -259,8 +253,6 @@ function freshModel(): Model {
     turning: new Set(),
     current: new Set(),
     released: new Set(),
-    factsQueued: undefined,
-    factsOwed: false,
   }
 }
 
@@ -343,8 +335,6 @@ function dropCommands(owner: AgentRecord, drop: (task: SavedTask) => boolean): v
 
 function release(agentId: string): void {
   if (agentId === MAIN) return
-  const record = model.agents.get(agentId)
-  const facts = record?.facts
   const unsent = session !== undefined && !session.announced.has(agentId)
   const earlier = releaseQueued(agentId)
   const known = model.agents.delete(agentId)
@@ -358,9 +348,7 @@ function release(agentId: string): void {
   // beside the release this run queued. A release that collapsed into an earlier one ends a run whose start never
   // left, so the earlier release keeps what it holds.
   const ending = earlier ? undefined : queue.reports.find((queued) => isRelease(queued, agentId))
-  if (unsent && ending !== undefined && facts !== undefined && Object.keys(facts).length > 0) {
-    closingSets.set(ending, facts)
-  }
+  agentLeft(agentId, unsent ? ending : undefined)
   // A released agent that resumes under its id is announced again, which restarts it on the router.
   session?.announced.delete(agentId)
   for (const owner of [...model.agents.values()]) {
@@ -370,10 +358,10 @@ function release(agentId: string): void {
 
 // A live agent the mod meets first in the client's list or the router's answer (one that ran before this load, or one
 // resumed after its release) joins its parent's open set, so the parent stays parked on it until it ends.
-function adopt(agentId: string, parentId: string | undefined, state: AgentRecord['state'], facts: AgentFactSet): void {
+function adopt(agentId: string, parentId: string | undefined, state: AgentRecord['state'], info: AgentInfo): void {
   const parent = parentId ?? MAIN
   const agent = freshRecord(agentId, state, parent)
-  agent.facts = facts
+  agentListed(agentId, info)
   model.released.delete(agentId)
   session?.routerReleased.delete(agentId)
   model.agents.set(agentId, agent)
@@ -390,11 +378,6 @@ function holder(agentId: string | undefined): string | undefined {
   return model.agents.has(host) ? host : MAIN
 }
 
-// A row's members are read with the option on alone, so a default install reads none of them.
-function listedFacts(info: AgentInfo): AgentFactSet {
-  return factOptions.agents ? agentFactSet({ description: info.description, name: info.name, type: info.type }) : {}
-}
-
 // Judges a loop the mod meets first. An agent the client lists is adopted, and a loop it never names (a workflow's
 // agent, one of the engine's forks) counts for main and never becomes a router agent, so no tick releases it.
 async function attribute($: EngineInterface, agentId: string | undefined): Promise<string | undefined> {
@@ -407,7 +390,7 @@ async function attribute($: EngineInterface, agentId: string | undefined): Promi
   if (session !== record) return undefined
   const info = listed?.find((agent) => agent.id === agentId)
   if (info !== undefined) {
-    adopt(agentId, info.parentId, 'idle', listedFacts(info))
+    adopt(agentId, info.parentId, 'idle', info)
     return agentId
   }
   // An unreadable list judges nothing, so the loop's next event asks again.
@@ -573,7 +556,7 @@ async function reconcile($: EngineInterface): Promise<void> {
       release(agent.id)
       continue
     }
-    agent.facts = listedFacts(info)
+    agentListed(agent.id, info)
     if (record !== undefined) sendAgentFacts(record, agent.id, false)
   }
   // A command is stopped at its deadline, so the first tick past it closes the task when no notification did.
@@ -598,7 +581,7 @@ function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): voi
   // one the list was asked for is another run, which the row does not describe.
   for (const agent of listed?.asked ?? []) {
     const info = model.agents.get(agent.id) === agent ? client?.get(agent.id) : undefined
-    if (info !== undefined) agent.facts = listedFacts(info)
+    if (info !== undefined) agentListed(agent.id, info)
   }
   const live: AgentInfo[] = []
   for (const [id, { state, park }] of held) {
@@ -637,7 +620,7 @@ function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): voi
     const at = live.findIndex((info) => !live.some((other) => other.id === (info.parentId ?? MAIN)))
     const [info] = live.splice(at < 0 ? 0 : at, 1)
     if (info === undefined) break
-    adopt(info.id, info.parentId, 'busy', listedFacts(info))
+    adopt(info.id, info.parentId, 'busy', info)
     report(info.id, 'busy')
   }
   for (const agent of [...model.agents.values()]) {
@@ -656,15 +639,6 @@ function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): voi
 
 function agentList($: EngineInterface): Promise<AgentInfo[] | undefined> {
   return guarded(() => $.agent.list())
-}
-
-// The kinds whose option is on, in alphabetical order, so two registrations of one option set carry one body.
-function reportedKinds(): FactKind[] {
-  const kinds: FactKind[] = []
-  if (factOptions.agents) kinds.push('agents')
-  if (factOptions.project) kinds.push('project')
-  if (factOptions.title) kinds.push('title')
-  return kinds
 }
 
 function startReport(previousInstance?: string): Report {
@@ -705,40 +679,6 @@ function snapshotModel(record: SessionRecord): SavedModel {
   }
 }
 
-function snapshotFacts(record: SessionRecord): SavedFacts {
-  const agents: SavedAgentFacts[] = []
-  for (const agent of model.agents.values()) {
-    const saved = savedFacts(agent)
-    if (saved.facts !== undefined || saved.factsOwed === true) agents.push({ id: agent.id, ...saved })
-  }
-  return { id: record.id, agents, ...savedFacts(model) }
-}
-
-function savedFacts<T>(slot: FactsSlot<T>): { facts?: T; factsOwed?: true } {
-  return {
-    ...(slot.factsQueued === undefined ? {} : { facts: { ...slot.factsQueued } }),
-    ...(slot.factsOwed ? { factsOwed: true as const } : {}),
-  }
-}
-
-function restoreFacts<T>(slot: FactsSlot<T>, saved: { facts?: T; factsOwed?: true }): void {
-  slot.factsQueued = saved.facts
-  slot.factsOwed = saved.factsOwed === true
-}
-
-const PROJECT_MEMBERS = ['branch', 'cwd', 'project', 'repository', 'repository_root'] as const
-
-// The members of a saved set whose kind is on. The registration's list states a kind that is off, so its members
-// do not come back.
-function keptFacts(saved: SessionFactSet): SessionFactSet {
-  const kept: SessionFactSet = {}
-  if (factOptions.title && saved.title !== undefined) kept.title = saved.title
-  if (factOptions.project) {
-    for (const member of PROJECT_MEMBERS) if (saved[member] !== undefined) kept[member] = saved[member]
-  }
-  return kept
-}
-
 function restoreModel(saved: SavedModel, sessionRecord: SessionRecord): void {
   model.agents = new Map(saved.agents.map((agent) => {
     const record = freshRecord(agent.id, agent.state, agent.parent)
@@ -750,33 +690,6 @@ function restoreModel(saved: SavedModel, sessionRecord: SessionRecord): void {
   model.released = new Set(saved.released)
   sessionRecord.routerReleased = new Set(saved.routerReleased)
   mainAgent()
-}
-
-// The saved sets back in their slots, under the options. An entry of an agent the restored work does not hold is
-// left out, so the slots and the records stay in step.
-function restoreSavedFacts(saved: SavedFacts): void {
-  if (factOptions.agents) {
-    for (const entry of saved.agents) {
-      const record = model.agents.get(entry.id)
-      if (record === undefined) continue
-      restoreFacts(record, entry)
-      // No spawn fires again at a reload, so the saved set stands until the list's next read.
-      if (entry.facts !== undefined) record.facts = entry.facts
-    }
-  }
-  // The saved set does not say which members owed the mark, so the mark comes back while either kind is on. The
-  // one report that it costs carries the present set.
-  if (factOptions.project || factOptions.title) {
-    restoreFacts(model, {
-      ...(saved.facts === undefined ? {} : { facts: keptFacts(saved.facts) }),
-      ...(saved.factsOwed === true ? { factsOwed: true as const } : {}),
-    })
-  }
-  // No title event fires again at a reload, so the saved title stands until the next one. An event that saw the
-  // session in this activation is newer than the save, also where it carried no title.
-  if (factOptions.title && saved.facts?.title !== undefined && seenTitle?.id !== saved.id) {
-    seenTitle = { id: saved.id, title: saved.facts.title }
-  }
 }
 
 function heldModelFor(held: unknown, id: string): SavedModel | undefined {
@@ -830,7 +743,7 @@ async function writeLink($: EngineInterface): Promise<void> {
   if (record === undefined) return
   // Both snapshots are taken in one step, so the two values describe one moment.
   const work = snapshotModel(record)
-  const sets = snapshotFacts(record)
+  const sets = savedFacts(record.id)
   const workText = JSON.stringify(work)
   const setsText = JSON.stringify(sets)
   const writes: Promise<void>[] = []
@@ -842,7 +755,7 @@ async function writeLink($: EngineInterface): Promise<void> {
   if (setsText !== savedSets) {
     writes.push(followWrite($, $.state.set(FACTS_REF, sets), () => {
       savedSets = setsText
-    }, () => void landedLate($, record, () => JSON.stringify(snapshotFacts(record)) !== setsText)))
+    }, () => void landedLate($, record, () => JSON.stringify(savedFacts(record.id)) !== setsText)))
   }
   // Both writes are out together, so the link ends within one write limit, and a refused write of one value
   // leaves the other its time.
@@ -913,15 +826,15 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
     announced: new Set(),
     routerReleased: new Set(),
     stopped: false,
-    factsDue: false,
   }
   queue.reports = collapse([], startReport())
   queue.deferred = new Map()
   savedModel = undefined
   savedSets = undefined
+  resetFacts()
   Object.assign(model, freshModel())
   if (held !== undefined) restoreModel(held, session)
-  if (heldFacts !== undefined) restoreSavedFacts(heldFacts)
+  if (heldFacts !== undefined) restoreFacts(heldFacts)
   keepIdentity($, isCurrent)
   return false
 }
@@ -1044,112 +957,29 @@ export function emptyQueue(): void {
   queue.reports = []
 }
 
-// The loader refuses a `$` member read as a value, so no presence is tested: a client that lacks the member throws at
-// the call, as one that rejects it does, and both answer no value.
-async function guarded<T>(call: () => Promise<T>): Promise<T | undefined> {
-  try {
-    return await call()
-  } catch {
-    return undefined
-  }
-}
-
-// The branch of the directory the read took, so a move while git is out pairs no place with another place's branch.
-// Where that read answered nothing, git runs in the session's present directory. A detached HEAD, a host that runs no
-// process, a missing git and the timeout all answer none, since any other word would read as a branch's name.
-async function branchOf($: EngineInterface, cwd: string | undefined): Promise<string | undefined> {
-  return guarded(async () => {
-    const { exitCode, stdout } = await $.process.run(['git', 'symbolic-ref', '--short', '-q', 'HEAD'],
-      { timeoutMs: 2000, ...(cwd === undefined ? {} : { cwd }) })
-    return exitCode === 0 ? stdout.split('\n')[0] : undefined
-  })
-}
-
 // One read of the session's set. No hook awaits it.
 async function readSessionFacts($: EngineInterface): Promise<void> {
   const held = reporting()
   if (held === undefined) return
   const { config, record } = held
-  const mine = ++factReads
-  const read: SessionRead = {}
-  if (factOptions.project) {
-    // Each call is guarded on its own: a client that lacks one, or a call that rejects, costs that call's facts alone.
-    const [cwd, project, repo] = await Promise.all([
-      guarded(() => $.session.cwd()),
-      guarded(() => $.session.root()),
-      guarded(() => $.session.repo()),
-    ])
-    read.project = project
-    read.cwd = cwd
-    if (repo !== undefined && repo !== null) {
-      read.repositoryRoot = repo.root
-      read.remote = repo.remote
-      read.branch = await branchOf($, cwd)
-    }
-  }
-  if (factOptions.title && seenTitle?.id === record.id) read.title = seenTitle.title
-  const set = sessionFactSet(read)
+  // A read of a title alone answers at once, so its set enters the queue in the caller's own step. A read of the
+  // project is the one that waits.
+  const pending = readSession($, record.id)
+  const read = pending instanceof Promise ? await pending : pending
   // The read speaks for the reporting it started under. A clear, a resume, a session's end, a refused key or
   // another URL or key since then means its result describes nothing the mod reports now.
   if (!sameReporting(reporting(), record, config)) return
-  // A later read that finished first holds the newer set.
-  if (mine < factReadsDone) return
-  factReadsDone = mine
-  // An acknowledged registration leaves the duty to send the set whole, since the router's record may be a new
-  // one. The first read that counts takes it, and a read that finds nothing to send has done it.
-  const whole = record.factsDue
-  record.factsDue = false
-  if (queueFacts(model, set, whole, { event: 'session_facts', ...set })) void pump($)
-}
-
-// Queues the agent's set. Only an agent the router acknowledged gets one, since the router answers facts ahead of
-// a start as it answers any report of an agent it does not hold. `whole` is the send behind an acknowledged start
-// or registration, where the router's record may be a new one.
-function sendAgentFacts(record: SessionRecord, id: string, whole: boolean): void {
-  // The registration's list states a kind that is off, so no report of that kind goes out.
-  if (!factOptions.agents) return
-  const agent = model.agents.get(id)
-  if (agent === undefined || id === MAIN || !record.announced.has(id)) return
-  queueFacts(agent, agent.facts, whole, { event: 'agent_facts', agent_id: id, ...agent.facts })
-}
-
-/** Queues the set where it goes out, and answers whether it did. */
-function queueFacts<T extends AgentFactSet | SessionFactSet>(slot: FactsSlot<T>, set: T, whole: boolean,
-  report: Report): boolean {
-  const holds = Object.keys(set).length > 0 || Object.keys(slot.factsQueued ?? {}).length > 0 || slot.factsOwed
-  if (whole ? !holds : sameFacts(set, slot.factsQueued)) return false
+  const report = sessionReport(read)
+  if (report === undefined) return
   queue.reports = collapse(queue.reports, report)
-  slot.factsQueued = set
-  slot.factsOwed = true
-  return true
+  void pump($)
 }
 
-// The router answered a facts report for good, with an acknowledgment or with a refusal that drops it. Where the
-// report is the last set queued, nothing is owed any more. The answer to an older report leaves the newer one owed.
-function factsSettled(report: Report): void {
-  if (report.event === 'session_facts') {
-    const { event: _event, ...set } = report
-    settleFacts(model, set)
-    return
-  }
-  if (report.event !== 'agent_facts') return
-  const { event: _event, agent_id: id, ...set } = report
-  // The record is gone for the set a run left behind, and that set owes nothing.
-  settleFacts(model.agents.get(id), set)
-}
-
-function settleFacts<T extends AgentFactSet | SessionFactSet>(slot: FactsSlot<T> | undefined, set: T): void {
-  if (slot !== undefined && sameFacts(set, slot.factsQueued)) slot.factsOwed = false
-}
-
-// Keeps the title an event names with its session's id. An event of the session without a string title leaves the
-// title empty, so the next read sends the set without it.
-function noteTitle(e: Frozen<ClassicEventOf['classic.SessionStart'] |
-  ClassicEventOf['classic.UserPromptSubmit']>): void {
-  const id = e.session_id
-  if (typeof id !== 'string') return
-  const title = e.session_title
-  seenTitle = { id, title: typeof title === 'string' ? title : undefined }
+// Queues the agent's set where the facts module hands one back. The record's own `announced` says whether the
+// router acknowledged the agent, and main reports no set.
+function sendAgentFacts(record: SessionRecord, id: string, whole: boolean): void {
+  const report = id === MAIN ? undefined : agentReport(id, record.announced.has(id), whole)
+  if (report !== undefined) queue.reports = collapse(queue.reports, report)
 }
 
 type AnsweredAgent = { agent_id: string; state: unknown; request_generation?: number; park?: Park }
@@ -1251,7 +1081,7 @@ function settle($: EngineInterface, config: Settings, record: SessionRecord, rep
   }
   // A log call that throws below would otherwise leave the owed mark on a report the router refused, and each later
   // registration would send the refused set again.
-  factsSettled(report)
+  settled(report)
   // Any other answer names a report the router never takes, so the mod drops it rather than retrying. The router
   // keeps no trace of it, which leaves this line as the one sign of a body the mod built wrong.
   const code = answerOf(response.text).code
@@ -1316,7 +1146,7 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
     } else {
       // The run ended while its start was out, so the agent stays out of `announced` and its record is gone. The
       // router holds the run until the queued release arrives, and the set the run left goes right ahead of it.
-      const last = closingSets.get(queue.reports[at] as Report)
+      const last = closingSet(queue.reports[at] as Report)
       if (last !== undefined) {
         queue.reports.splice(at, 0, { event: 'agent_facts', agent_id: report.agent_id, ...last })
       }
@@ -1336,12 +1166,12 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
   const track = isFacts(report) ? queue.facts : queue.lifecycle
   track.attempt = 0
   track.retryAt = undefined
-  if (isFacts(report)) factsSettled(report)
+  if (isFacts(report)) settled(report)
   if (report.event === 'session_start') {
     // An answer without the member says nothing about the router's agents, so nothing is reconciled against it.
     if (ack.agents !== undefined) reconcileAck(ack.agents, listed)
     for (const id of record.announced) sendAgentFacts(record, id, true)
-    record.factsDue = true
+    registrationAcknowledged()
     void readSessionFacts($)
   }
 }
@@ -1397,11 +1227,7 @@ function refusedReport($: EngineInterface, record: SessionRecord, report: Report
         // the agent's next lifecycle report brings.
         record.announced.delete(agent)
         queue.reports = queue.reports.filter((queued) => !sameAgent(queued, 'agent_facts', agent))
-        const held = model.agents.get(agent)
-        if (held !== undefined) {
-          held.factsQueued = undefined
-          held.factsOwed = false
-        }
+        agentRefused(agent)
         return
       }
       record.announced.delete(agent)
@@ -1587,7 +1413,6 @@ export function clearSettings(): void {
 
 export function installReporting(on: On, refused: RefusalHandler, facts: FactOptions, warming: boolean): void {
   onRefused = refused
-  factOptions = facts
   cacheWarming = warming
   on('prompt.submit', async ($, e, next) => {
     if (!active()) return next(e)
@@ -1681,9 +1506,9 @@ export function installReporting(on: On, refused: RefusalHandler, facts: FactOpt
       if (e.workflow !== undefined) {
         model.unlisted.set(agentId, parent)
       } else {
-        const agent = spawned(agentId, parent)
-        if (factOptions.agents && record !== undefined) {
-          agent.facts = agentFactSet({ description: e.description, name: e.name, type: e.subagentType })
+        spawned(agentId, parent)
+        if (record !== undefined) {
+          agentSpawned(agentId, e)
           // An agent whose start is on its way gets its set at the start's acknowledgment. One whose own step reached
           // the mod ahead of this answer, and which the router acknowledged since, gets the call's set as a change.
           sendAgentFacts(record, agentId, false)
@@ -1721,18 +1546,7 @@ export function installReporting(on: On, refused: RefusalHandler, facts: FactOpt
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  if (factOptions.title) {
-    // The title rides these two events and no other. Nothing but the title and the session id is read, so a prompt's
-    // text stays unread, and each event is passed on unchanged.
-    on('classic.SessionStart', async (_$, e, next) => {
-      noteTitle(e)
-      return next(e)
-    }).catch((_$, e, next) => next(e))
-    on('classic.UserPromptSubmit', async (_$, e, next) => {
-      noteTitle(e)
-      return next(e)
-    }).catch((_$, e, next) => next(e))
-  }
+  installFacts(on, facts)
 
   // The end goes out past a request in flight: every session.end hook shares one short budget, and the lease
   // covers whatever this one request does not reach.

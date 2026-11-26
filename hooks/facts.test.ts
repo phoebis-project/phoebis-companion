@@ -841,6 +841,30 @@ test('a spawn\'s facts follow its acknowledged start, and a workflow\'s agent se
   expect(events(router)).toEqual(['session_start', 'agent_start', 'agent_facts'])
 })
 
+test('a released agent leaves the saved facts', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  router.answerSpawn(() => ({ agentId: 'worker-1' }))
+  await spawn($, clock, REVIEWER)
+  // The agent's set is saved while it runs, so the absence below comes from the release.
+  expect(savedAgent(router, 'worker-1')).toMatchObject({ id: 'worker-1', facts: { name: 'reviewer' } })
+  router.setAgents([])
+  await complete($, clock, 'worker-1')
+  expect(savedAgent(router, 'worker-1')).toBeUndefined()
+})
+
+test('a clear leaves no agent of the earlier session in the saved facts', AGENTS, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  router.answerSpawn(() => ({ agentId: 'worker-1' }))
+  await spawn($, clock, REVIEWER)
+  expect(savedAgent(router, 'worker-1')).toMatchObject({ id: 'worker-1', facts: { name: 'reviewer' } })
+  await end($, clock, 'clear', 'session-a')
+  router.setId('session-b')
+  await prompt($, clock)
+  expect(router.values.get('facts')).toEqual({ id: 'session-b', agents: [] })
+})
+
 test('an agent\'s facts follow its start again where the router lost its record', AGENTS, async ($, on) => {
   const { clock, router } = host(on)
   router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW }])

@@ -1,7 +1,7 @@
 import type { EngineInterface, PluginOptions } from 'claude-code'
 
-// The settings layer and the helpers the two hooks modules share. reporting.ts and allowance.ts both import it, so the
-// allowance tool, which runs with the reports switched off, depends on nothing in the lifecycle.
+// The settings layer and the helpers the hooks modules share. reporting.ts, facts.ts and allowance.ts each import it,
+// so the allowance tool, which runs with the reports switched off, depends on nothing in the lifecycle.
 
 const CREDENTIAL = 'a URL with a username or password'
 const FRAGMENT = 'a URL with a fragment'
@@ -143,5 +143,15 @@ export function parsed(text: string): Record<string, unknown> {
     return object ? (value as Record<string, unknown>) : {}
   } catch {
     return {}
+  }
+}
+
+// The loader refuses a `$` member read as a value, so no presence is tested: a client that lacks the member throws at
+// the call, as one that rejects it does, and both answer no value.
+export async function guarded<T>(call: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await call()
+  } catch {
+    return undefined
   }
 }

@@ -159,9 +159,6 @@ function record(open: SavedTask[]): AgentRecord {
     state: 'idle',
     open: new Map(open.map((task) => [task.id, task])),
     lastPresence: 0,
-    facts: {},
-    factsQueued: undefined,
-    factsOwed: false,
   }
 }
 

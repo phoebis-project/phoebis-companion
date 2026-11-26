@@ -42,12 +42,6 @@ export type AgentRecord = {
   state: SavedAgent['state']
   open: Map<string, SavedTask>
   lastPresence: number
-  /** What the client last said of the agent, cleaned. Empty with the option off. */
-  facts: AgentFactSet
-  /** The set last queued for the agent, undefined while none was or once the router refused it as unknown. */
-  factsQueued: AgentFactSet | undefined
-  /** The router has not answered the last set queued for good. */
-  factsOwed: boolean
 }
 
 const PARK_KINDS = ['background', 'both', 'scheduled'] as const
