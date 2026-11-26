@@ -7,7 +7,7 @@ import { guarded } from './settings'
 import type { FactOptions } from './settings'
 
 // The facts the mod reports for display: the options, each agent's sets, the session's set, the closing sets, the
-// title seen and the reads. The module queues nothing, sends nothing and writes no host state. Where a set goes out it
+// titles seen and the reads. The module queues nothing, sends nothing and writes no host state. Where a set goes out it
 // answers a report, which the reporting module queues in the same step, so each order of the queue and each state call
 // has one owner.
 
@@ -38,8 +38,9 @@ const session: FactsSlot<SessionFactSet> & { due: boolean } = {
 // The set of a run that ended before the router acknowledged its start, by the queued release that ends the run, so
 // that acknowledgment puts it right ahead of that release. A later run of the agent ends under a release of its own.
 const closingSets = new WeakMap<Report, AgentFactSet>()
-// The title the client last named for a session, with that session's id: a title counts only for its own session.
-let seenTitle: { id: string; title: string | undefined } | undefined
+// The title the client last named for each session, by that session's id: a title counts only for its own
+// session. An entry without a title is an event that saw the session and carried none.
+const seenTitles = new Map<string, string | undefined>()
 // Counts the session reads, so a read that finishes behind a later one changes nothing.
 let factReads = 0
 let factReadsDone = 0
@@ -67,7 +68,7 @@ function noteTitle(e: Frozen<ClassicEventOf['classic.SessionStart'] |
   const id = e.session_id
   if (typeof id !== 'string') return
   const title = e.session_title
-  seenTitle = { id, title: typeof title === 'string' ? title : undefined }
+  seenTitles.set(id, typeof title === 'string' ? title : undefined)
 }
 
 // The kinds whose option is on, in alphabetical order, so two registrations of one option set carry one body.
@@ -79,11 +80,13 @@ export function reportedKinds(): FactKind[] {
   return kinds
 }
 
-export function resetFacts(): void {
+/** Empties each slot and drops the title seen of each session other than the one installed. */
+export function resetFacts(sessionId: string): void {
   agents.clear()
   session.factsQueued = undefined
   session.factsOwed = false
   session.due = false
+  for (const id of [...seenTitles.keys()]) if (id !== sessionId) seenTitles.delete(id)
 }
 
 const PROJECT_MEMBERS = ['branch', 'cwd', 'project', 'repository', 'repository_root'] as const
@@ -126,8 +129,8 @@ export function restoreFacts(saved: SavedFacts): void {
   }
   // No title event fires again at a reload, so the saved title stands until the next one. An event that saw the
   // session in this activation is newer than the save, also where it carried no title.
-  if (factOptions.title && saved.facts?.title !== undefined && seenTitle?.id !== saved.id) {
-    seenTitle = { id: saved.id, title: saved.facts.title }
+  if (factOptions.title && saved.facts?.title !== undefined && !seenTitles.has(saved.id)) {
+    seenTitles.set(saved.id, saved.facts.title)
   }
 }
 
@@ -264,7 +267,7 @@ async function readPlace($: EngineInterface): Promise<SessionRead> {
 export function readSession($: EngineInterface, sessionId: string): SessionFactsRead | Promise<SessionFactsRead> {
   const number = ++factReads
   const finish = (read: SessionRead): SessionFactsRead => {
-    if (factOptions.title && seenTitle?.id === sessionId) read.title = seenTitle.title
+    if (factOptions.title && seenTitles.has(sessionId)) read.title = seenTitles.get(sessionId)
     return { number, set: sessionFactSet(read) }
   }
   // A read of a title alone awaits nothing, so its set enters the queue in the caller's own step.

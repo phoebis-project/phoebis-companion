@@ -233,6 +233,19 @@ test('a title seen under a cleared session does not go out under the new id', TI
     .toEqual(['session_start', 'activity'])
 })
 
+test('a late title event of an earlier session leaves the present session its title', TITLED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  await end($, clock, 'clear', 'session-a')
+  router.setId('session-b')
+  await titled($, clock, 'UserPromptSubmit', 'session-b', 'Tax export')
+  await prompt($, clock)
+  // An event of the session the host left lands late, behind the present session's.
+  await titled($, clock, 'UserPromptSubmit', 'session-a', 'Checkout retry')
+  await prompt($, clock)
+  expect(facts(router)).toEqual([{ title: 'Tax export' }])
+})
+
 test('a title seen behind the prompt\'s read leaves at the end of main\'s turn', TITLED, async ($, on) => {
   const { clock, router } = host(on)
   await start($, clock)
@@ -470,6 +483,12 @@ test('a clear owed at a reload goes out at the registration', TITLED, async ($, 
   const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: OWED_SAVED } })
   await start($, clock)
   expect(facts(router)).toEqual([{}])
+})
+
+test('a saved title goes out again at a reload that sees no title event', TITLED, async ($, on) => {
+  const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: TITLED_SAVED } })
+  await start($, clock)
+  expect(facts(router)).toEqual([{ title: 'Checkout retry' }])
 })
 
 test('a title event ahead of the start outranks the saved title', TITLED, async ($, on) => {

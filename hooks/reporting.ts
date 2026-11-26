@@ -831,7 +831,7 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
   queue.deferred = new Map()
   savedModel = undefined
   savedSets = undefined
-  resetFacts()
+  resetFacts(id)
   Object.assign(model, freshModel())
   if (held !== undefined) restoreModel(held, session)
   if (heldFacts !== undefined) restoreFacts(heldFacts)
