@@ -7,7 +7,8 @@ import type { AgentFactSet, Identity, SavedAgent, SavedCron, SavedTask, SessionF
 export type FactKind = 'agents' | 'project' | 'title'
 
 export type Report =
-  | { event: 'session_start'; reported_facts: FactKind[]; owner_id?: string; previous_instance_id?: string }
+  | { event: 'session_start'; reported_facts: FactKind[]; cache_warming: boolean; owner_id?: string;
+      previous_instance_id?: string }
   | { event: 'heartbeat' }
   | { event: 'session_end' }
   | { event: 'agent_start'; agent_id: string }

@@ -15,6 +15,7 @@ type Options = {
   managementUrl: string
   token: string
   reports: boolean
+  cacheWarming: boolean
   notifications: boolean
   facts: FactOptions
 }
@@ -65,6 +66,7 @@ export function optionsOf(options: PluginOptions): Options {
     managementUrl: typeof options.management_url === 'string' ? options.management_url : '',
     token: typeof options.token === 'string' ? options.token : '',
     reports: flag(options.reports, true),
+    cacheWarming: flag(options.cache_warming, true),
     notifications: flag(options.notifications, true),
     facts: {
       agents: flag(options.report_agents, false),

@@ -46,7 +46,7 @@ export const register: Register = (on, options) => {
     // it replaced leaves that start current.
     installKeepalive(on, (status, under) => {
       if (status === 401 && current === under) current = undefined
-    }, config.facts)
+    }, config.facts, config.cacheWarming)
   }
 
   on('tool.call', { tool: TOOL_CALL }, async ($) => {

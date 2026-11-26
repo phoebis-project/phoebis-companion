@@ -295,7 +295,7 @@ const EVENT_FIELDS: Record<string, { required: string[]; optional: string[] }> =
   heartbeat: { required: [], optional: [] },
   session_end: { required: [], optional: [] },
   session_facts: { required: [], optional: ['branch', 'cwd', 'project', 'repository', 'repository_root', 'title'] },
-  session_start: { required: ['reported_facts'], optional: ['owner_id', 'previous_instance_id'] },
+  session_start: { required: ['cache_warming', 'reported_facts'], optional: ['owner_id', 'previous_instance_id'] },
   state: { required: ['agent_id', 'state'], optional: ['deadline', 'park_kind', 'request_generation', 'wake_at'] },
 }
 
@@ -316,6 +316,7 @@ function invalid(body: Record<string, unknown>): string | undefined {
     kinds.some((word) => typeof word !== 'string' || !['agents', 'project', 'title'].includes(word)))) {
     return 'invalid_event'
   }
+  if (body.cache_warming !== undefined && typeof body.cache_warming !== 'boolean') return 'invalid_event'
   const ids = [body.session_id, body.instance_id, body.agent_id ?? 'main']
   if (ids.some((id) => typeof id !== 'string' || id === '')) return 'invalid_identity'
   if (!Number.isInteger(body.sequence) || (body.sequence as number) < 1) return 'invalid_identity'

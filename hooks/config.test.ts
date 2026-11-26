@@ -158,3 +158,20 @@ test('Session reports off sends no session_start while the allowance GET still g
     expect(router.gets.map((get) => get.url)).toStrictEqual([`${ROUTER}/v0/companion/allowance?session_id=session-a`])
     expect(router.requests).toStrictEqual([])
   })
+
+describe('a registration carries the Cache warming option', () => {
+  const warming = (router: FakeRouter): unknown[] =>
+    router.requests.map((body) => body.event === 'session_start' ? body.cache_warming : undefined)
+
+  test('true in a default install', CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    expect(warming(router)).toEqual([true])
+  })
+
+  test('false with the option off', { options: { management_url: ROUTER, cache_warming: false } }, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    expect(warming(router)).toEqual([false])
+  })
+})

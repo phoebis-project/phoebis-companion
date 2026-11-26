@@ -12,6 +12,8 @@
       "description": "Empty uses the client's own token variable. A key set here needs the Management URL." },
     "reports": { "type": "boolean", "title": "Session reports", "default": true,
       "description": "Report this session, its agents and their states to the router. Off leaves the start check and the tool." },
+    "cache_warming": { "type": "boolean", "title": "Cache warming", "default": true,
+      "description": "Let the router keep this session's prompt caches warm. Needs Session reports on." },
     "notifications": { "type": "boolean", "title": "Start check toasts", "default": true,
       "description": "Raise a toast beside each transcript line of the start check." },
     "report_agents": { "type": "boolean", "title": "Agent reports", "default": false,

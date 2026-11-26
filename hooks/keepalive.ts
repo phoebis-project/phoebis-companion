@@ -149,6 +149,9 @@ type RefusalHandler = (status: number, under: Settings) => void
 let onRefused: RefusalHandler = () => undefined
 
 let factOptions: FactOptions = { agents: false, project: false, title: false }
+// The Cache warming option, which each registration carries. Nothing else in the mod reads it: the router decides
+// what it warms.
+let cacheWarming = true
 // The tracked work as the host last took it, so a pump writes it only when it changed.
 let savedModel: string | undefined
 let modelWrites: Promise<unknown> = Promise.resolve()
@@ -652,7 +655,7 @@ function reportedKinds(): FactKind[] {
 }
 
 function startReport(previousInstance?: string): Report {
-  const start: Report = { event: 'session_start', reported_facts: reportedKinds() }
+  const start: Report = { event: 'session_start', reported_facts: reportedKinds(), cache_warming: cacheWarming }
   return previousInstance === undefined ? start : { ...start, previous_instance_id: previousInstance }
 }
 
@@ -1531,9 +1534,10 @@ export function clearSettings(): void {
   settings = undefined
 }
 
-export function installKeepalive(on: On, refused: RefusalHandler, facts: FactOptions): void {
+export function installKeepalive(on: On, refused: RefusalHandler, facts: FactOptions, warming: boolean): void {
   onRefused = refused
   factOptions = facts
+  cacheWarming = warming
   on('prompt.submit', async ($, e, next) => {
     if (!active()) return next(e)
     // A prompt typed into a session the host left while the prompt's read of the held work was out belongs to that

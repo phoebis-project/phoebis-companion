@@ -30,6 +30,7 @@ one:
 | Management URL (`management_url`): where to report and to read | empty | `ANTHROPIC_BASE_URL` |
 | Router key (`token`): the key, kept in Claude Code's secure storage | empty | `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN` |
 | Session reports (`reports`): whether the mod reports the session, its agents and their states | on | none |
+| Cache warming (`cache_warming`): whether the router keeps this session's prompt caches warm | on | none |
 | Start check toasts (`notifications`): whether a start check's transcript line also raises a toast | on | none |
 | Agent reports (`report_agents`): whether each subagent's description, type and name are reported | off | none |
 | Project reports (`report_project`): whether the project directory, the repository and the branch are reported | off | none |
@@ -71,13 +72,14 @@ block](../router/client.md#the-environment-block) on the router's page The clien
 [`CLAUDE_CODE_SUBSCRIPTION_TYPE`](../router/client.md#claude_code_subscription_type) there says what the client does
 with it.
 
-With Session reports off, the mod sends no report, and the start check and the tool still run. The backoff, the
-heartbeat interval, the presence throttle, the request limit, the start check's wait, the tool's cache and the write
-limit are constants, and the mod has no other setting. A report that did not get through, for a transport failure, a
-5xx, a limit or no answer within the request limit of 10 seconds, goes out again along a fixed backoff. A heartbeat goes
-out at a share of the remaining lease, within fixed bounds, and both figures are on [The
-relay](../router/relay.md#the-keepalive-protocol). A presence report goes out at most once a minute
-([Presence](reports.md#presence)).
+With Session reports off, the mod sends no report, and the start check and the tool still run. With Cache warming off,
+the mod reports as before, and its registration tells the router to keep no prompt of the session, so the router warms
+no cache for it. The option needs Session reports on. The backoff, the heartbeat interval, the presence throttle, the
+request limit, the start check's wait, the tool's cache and the write limit are constants, and the mod has no other
+setting. A report that did not get through, for a transport failure, a 5xx, a limit or no answer within the request
+limit of 10 seconds, goes out again along a fixed backoff. A heartbeat goes out at a share of the remaining lease,
+within fixed bounds, and both figures are on [The relay](../router/relay.md#the-keepalive-protocol). A presence report
+goes out at most once a minute ([Presence](reports.md#presence)).
 
 With Session title reports on, the mod reports the title a `/rename` gave the session, for the console's [Sessions
 view](../router/console.md#sessions). The option needs Session reports on. Turned off, it clears the title it reported
