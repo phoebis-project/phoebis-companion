@@ -479,6 +479,22 @@ test('an abandoned write of the tracked work that lands after the host left its 
     expect(stateWrites(router)).toBe(writes)
   })
 
+test('a pump of a session the host left writes no work under the session the host is in', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    // Main's turn end changes the work, the host refuses each write of it, and the router answers the state with a
+    // 503, so the work is still unwritten when the state's retry comes due a second later.
+    router.denyWrites('model', 'the host refuses the write')
+    router.answer(() => ({ status: 503 }))
+    await complete($, clock)
+    // The host moves to another session with no start and no prompt under it, so the module still holds the record.
+    router.setId('session-b')
+    const writes = stateWrites(router)
+    await clock.advance(1000)
+    expect(stateWrites(router)).toBe(writes)
+  })
+
 test('a clear owed at a reload goes out at the registration', TITLED, async ($, on) => {
   const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: OWED_SAVED } })
   await start($, clock)

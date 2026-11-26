@@ -696,17 +696,19 @@ function heldFor<T>(held: unknown, id: string, lists: readonly string[]): T | un
 
 /**
  * Follows one write of a saved value and answers once the host has answered it or the write limit has passed. The
- * limit abandons a write and does not end it, so the host can land it behind a newer one. `landed` therefore runs in
- * the handler on the host's own promise, for a landing in time and for a late one alike, so the saved texts change in
- * the order of the host's answers. `late` runs behind it where the landing came behind the limit. A write that the
- * host refuses changes nothing, in time or late.
+ * write answers whether the host took one, since the link withholds it for a session the host left. The limit abandons
+ * a write and does not end it, so the host can land it behind a newer one. `landed` therefore runs in the handler on
+ * the host's own promise, for a landing in time and for a late one alike, so the saved texts change in the order of the
+ * host's answers. `late` runs behind it where the landing came behind the limit. A write that the host refuses or the
+ * link withholds changes nothing, in time or late.
  */
-function followWrite($: EngineInterface, write: Promise<unknown>, landed: () => void,
+function followWrite($: EngineInterface, write: Promise<boolean>, landed: () => void,
   late: () => void): Promise<void> {
   let abandoned = false
   // The limit's wait is a call that the host holds open, so it ends once the host has answered the write.
   const limit = new AbortController()
-  const answered = write.then(() => {
+  const answered = write.then((wrote) => {
+    if (!wrote) return
     landed()
     if (abandoned) late()
   }, () => undefined).finally(() => limit.abort())
@@ -717,9 +719,9 @@ function followWrite($: EngineInterface, write: Promise<unknown>, landed: () => 
 
 /**
  * Runs where a write of a saved value that the limit abandoned has landed. The host can now hold a text that is not
- * the present snapshot's, and one more pump writes the snapshot again. The landing acts for its own session alone: a
- * pump writes ahead of each of its checks, so one started behind a move of the host would write this record's work
- * into the state of another session.
+ * the present snapshot's, and one more pump writes the snapshot again. The landing acts for its own session alone,
+ * since a link writes a record's values only while the host is in that record's session, so a pump started behind a
+ * move of the host or of the module would write nothing of this record's.
  */
 async function landedLate($: EngineInterface, record: SessionRecord, stale: () => boolean): Promise<void> {
   const id = await guarded(() => $.session.id())
@@ -735,14 +737,24 @@ async function writeLink($: EngineInterface): Promise<void> {
   const sets = savedFacts(record.id)
   const workText = JSON.stringify(work)
   const setsText = JSON.stringify(sets)
+  if (workText === savedModel && setsText === savedSets) return
+  // The host keeps its state per session, and a clear or a resume moves it with no start, so a pump can run for a
+  // record that the host or the module has left. Its values then stay out of the state of the session the host is in,
+  // where they would replace that session's own. The one read serves both writes and runs inside their limit.
+  const here = guarded(() => $.session.id()).then((id) => id === record.id && session === record)
+  const writeHere = async (write: () => Promise<unknown>): Promise<boolean> => {
+    if (!await here) return false
+    await write()
+    return true
+  }
   const writes: Promise<void>[] = []
   if (workText !== savedModel) {
-    writes.push(followWrite($, $.state.set(MODEL_REF, work), () => {
+    writes.push(followWrite($, writeHere(() => $.state.set(MODEL_REF, work)), () => {
       savedModel = workText
     }, () => void landedLate($, record, () => JSON.stringify(snapshotModel(record)) !== workText)))
   }
   if (setsText !== savedSets) {
-    writes.push(followWrite($, $.state.set(FACTS_REF, sets), () => {
+    writes.push(followWrite($, writeHere(() => $.state.set(FACTS_REF, sets)), () => {
       savedSets = setsText
     }, () => void landedLate($, record, () => JSON.stringify(savedFacts(record.id)) !== setsText)))
   }
