@@ -79,9 +79,10 @@ const REQUEST_LIMIT_MS = 10000
 // and a pump waits for the link that runs and for the one behind it, so a hung state call holds the pump ten seconds at
 // most and, with the tick's two reads ahead of it and a hung request behind it, a due heartbeat thirty.
 const WRITE_LIMIT_MS = 5000
-// A read of the host with no answer by then counts as a failed read, as one the host refuses does. With the request's
-// ten seconds ahead of it, a registration's answer is handled inside fifteen seconds of a lease of 90, and a tick
-// queues its heartbeat ten seconds late at most, behind the session id's read and the agent list's.
+// A read of the client's agent list, or of the session id at a heartbeat, with no answer by then counts as a failed
+// read, as one the host refuses does. With the request's ten seconds ahead of it, a registration's answer is handled
+// inside fifteen seconds of a lease of 90, and a tick queues its heartbeat ten seconds late at most, behind the session
+// id's read and the agent list's.
 const READ_LIMIT_MS = 5000
 
 type SessionRecord = {
@@ -1304,8 +1305,6 @@ function tick($: EngineInterface): void {
       if (!active()) return
       const record = session
       const due = record?.heartbeatAt
-      // A tick serves the record the host still holds. An id that is not the record's was read across a clear or a
-      // resume, and neither raises a start, so the tick leaves the new conversation to its first prompt.
       const id = await limitedRead($, () => $.session.id())
       if (id === undefined) {
         // The mod cannot tell which session the host holds, so the tick sends nothing and reads the id again one
@@ -1319,6 +1318,8 @@ function tick($: EngineInterface): void {
         }
         return
       }
+      // A tick serves the record the host still holds. An id that is not the record's was read across a clear or a
+      // resume, and neither raises a start, so the tick leaves the new conversation to its first prompt.
       if (session?.id !== id) return
       // A failed reconcile must not cost the lease, so the heartbeat goes out either way.
       if (live()) await reconcile($).catch(() => undefined)
