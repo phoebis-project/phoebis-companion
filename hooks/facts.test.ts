@@ -582,6 +582,13 @@ test('a saved project that left is cleared at the reload\'s registration while i
     expect(facts(router)).toEqual([{}])
   })
 
+test('a saved title stays unsent at a reload while Session title reports is off and Project reports is on', PLACED,
+  async ($, on) => {
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
+    await start($, clock)
+    expect(events(router)).toEqual(['session_start'])
+  })
+
 test('a set that stays the same is sent once, and a changed branch sends it again', PLACED, async ($, on) => {
   const { clock, router } = host(on, { place: STOREFRONT })
   router.answerGit(() => onBranch('main'))
@@ -943,6 +950,8 @@ test('an agent\'s saved facts stay unsent at its release while Agent reports is 
     await complete($, clock, 'worker-1')
     await clock.advance(2000)
     expect(agentFacts(router)).toEqual([])
+    // The agent's start and then its release went out, so the absence above comes from the path that the case guards.
+    expect(events(router)).toEqual(['session_start', 'agent_start', 'state'])
   })
 
 test('an agent\'s clear the router did not acknowledge is saved as owed', AGENTS, async ($, on) => {
