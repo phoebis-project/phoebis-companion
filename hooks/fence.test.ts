@@ -200,7 +200,7 @@ test('a start after a clear in the same process keeps the instance once the stor
 
 test('a start replaced while its fence reads writes none of its identity', CONFIGURED, async ($, on) => {
   const { clock, router } = processHost(on, { ANTHROPIC_AUTH_TOKEN: KEY }, { process: PROCESS })
-  // The first start's read of the stored pairs answers a second late, and a second start runs to its end meanwhile.
+  // The first start's read of its key answers a second late, and a second start runs to its end meanwhile.
   router.delayStore(1000)
   const replaced = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
   await clock.settle()

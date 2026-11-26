@@ -801,9 +801,9 @@ function persistModel($: EngineInterface): Promise<void> {
 }
 
 // The host keeps its state per session, and a clear or a resume raises no start, so no fence writes the instance under
-// an id the process adopts at a prompt. Held there, it serves a reload under that id once the store's list no longer
-// holds the process. The step waits its turn behind the fence's writes, so it never lands inside them, and guarded
-// keeps a refused call from stalling the chain or reaching the caller.
+// an id the process adopts at a prompt. Held there, it serves a reload under that id once the store no longer holds the
+// process's key. The step waits its turn behind the fence's writes, so it never lands inside them, and guarded keeps a
+// refused call from stalling the chain or reaching the caller.
 function keepIdentity($: EngineInterface, isCurrent: () => boolean): void {
   fenceWrites = fenceWrites.then(() => guarded(async () => {
     const { value: held } = await $.state.get(IDENTITY_REF)
