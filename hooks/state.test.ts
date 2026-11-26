@@ -2033,3 +2033,17 @@ test('an agent spawned while the heartbeat\'s list is pending is not released ag
       'state main parked background',
     ])
   })
+
+test('a tick whose list read never answers sends its heartbeat once five seconds have passed', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    router.delayList(70_000)
+    // The tick falls due twenty five seconds behind the registration under the rig's lease.
+    await clock.advance(25_000)
+    await clock.advance(4_999)
+    expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
+    await clock.advance(1)
+    expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'heartbeat'])
+    expect(router.times).toEqual([T0, T0 + 30_000])
+  })

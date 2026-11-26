@@ -259,6 +259,19 @@ test('a heartbeat whose own request never answers is sent again behind ten secon
     expect(router.times).toEqual([T0, T0 + 25_000, T0 + 36_000])
   })
 
+test('a registration whose list read never answers schedules its heartbeat once five seconds have passed',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    router.delayList(70_000)
+    await start($, clock)
+    // The list's five seconds, then the heartbeat's twenty five under the rig's lease.
+    await clock.advance(29_999)
+    expect(events(router)).toEqual(['session_start'])
+    await clock.advance(1)
+    expect(events(router)).toEqual(['session_start', 'heartbeat'])
+    expect(router.times).toEqual([T0, T0 + 30_000])
+  })
+
 test('a fetch that throws writes one debug line naming the report and the error, and a 5xx writes none',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)

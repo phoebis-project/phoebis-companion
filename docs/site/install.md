@@ -74,12 +74,12 @@ with it.
 
 With Session reports off, the mod sends no report, and the start check and the tool still run. With Cache warming off,
 the mod reports as before, and its registration tells the router to keep no prompt of the session, so the router warms
-no cache for it. The option needs Session reports on. The backoff, the heartbeat interval, the presence throttle, the
-request limit, the start check's wait, the tool's cache and the write limit are constants, and the mod has no other
-setting. A report that did not get through, for a transport failure, a 5xx, a limit or no answer within the request
-limit of 10 seconds, goes out again along a fixed backoff. A heartbeat goes out at a share of the remaining lease,
-within fixed bounds, and both figures are on [The relay](../router/relay.md#the-companion-protocol). A presence report
-goes out at most once a minute ([Presence](reports.md#presence)).
+no cache for it. The option needs Session reports on. The backoff, the heartbeat interval, the list limit, the presence
+throttle, the request limit, the start check's wait, the tool's cache and the write limit are constants, and the mod has
+no other setting. A report that did not get through, for a transport failure, a 5xx, a limit or no answer within the
+request limit of 10 seconds, goes out again along a fixed backoff. A heartbeat goes out at a share of the remaining
+lease, within fixed bounds, and both figures are on [The relay](../router/relay.md#the-companion-protocol). A presence
+report goes out at most once a minute ([Presence](reports.md#presence)).
 
 With Session title reports on, the mod reports the title a `/rename` gave the session, for the console's [Sessions
 view](../router/console.md#sessions). The option needs Session reports on. Turned off, it clears the title it reported

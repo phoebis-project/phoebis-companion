@@ -76,8 +76,12 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000]
 const REQUEST_LIMIT_MS = 10000
 // A write of a saved value that has not landed by then is abandoned. A link starts its writes together, two at most,
 // and a pump waits for the link that runs and for the one behind it, so a hung state call holds the pump ten seconds at
-// most and, with a hung request behind it, a due heartbeat twenty.
+// most and, with the tick's hung list read ahead of it and a hung request behind it, a due heartbeat twenty five.
 const WRITE_LIMIT_MS = 5000
+// A read of the client's agent list with no answer by then counts as a failed read. With the request's ten seconds
+// ahead of it, a registration's answer is handled inside fifteen seconds of a lease of 90, and a tick queues its
+// heartbeat five seconds late at most.
+const LIST_LIMIT_MS = 5000
 
 type SessionRecord = {
   id: string
@@ -542,8 +546,10 @@ async function reconcile($: EngineInterface): Promise<void> {
   // not in it, and a session replaced meanwhile is not the one it describes.
   const record = session
   const candidates = [...model.agents.values()].filter((agent) => agent.id !== MAIN)
-  const listed = new Map((await $.agent.list()).map((agent) => [agent.id, agent]))
-  if (session !== record) return
+  const rows = await agentList($)
+  // An unreadable list judges nothing, so each agent stays as held until a later tick reads the list.
+  if (rows === undefined || session !== record) return
+  const listed = new Map(rows.map((agent) => [agent.id, agent]))
   // A loop judged unlisted that the list names now is an agent, so its next event is judged again.
   for (const id of [...model.unlisted.keys()]) if (listed.has(id)) model.unlisted.delete(id)
   for (const agent of candidates) {
@@ -635,7 +641,22 @@ function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): voi
 }
 
 function agentList($: EngineInterface): Promise<AgentInfo[] | undefined> {
-  return guarded(() => $.agent.list())
+  return guarded(async () => {
+    const read = $.agent.list()
+    // The race is the one reader of the list, so an answer behind the limit reaches no caller. A rejection behind the
+    // limit is dropped on purpose: the race already holds it, and this handler says so at the call.
+    read.catch(() => undefined)
+    // The limit's wait is a call that the host holds open, so it ends with the race and none outlives its read.
+    const limit = new AbortController()
+    try {
+      return await Promise.race([
+        read,
+        $.clock.sleep(LIST_LIMIT_MS, { signal: limit.signal }).then(() => undefined),
+      ])
+    } finally {
+      limit.abort()
+    }
+  })
 }
 
 function startReport(previousInstance?: string): Report {
