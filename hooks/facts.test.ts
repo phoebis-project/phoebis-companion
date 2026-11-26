@@ -865,6 +865,22 @@ test('a clear leaves no agent of the earlier session in the saved facts', AGENTS
   expect(router.values.get('facts')).toEqual({ id: 'session-b', agents: [] })
 })
 
+test('a clear leaves the new session no owed mark of the session before it', TITLED, async ($, on) => {
+  const { clock, router } = host(on)
+  router.answer((_body, ack) => ok(ack))
+  router.answer(() => ({ status: 503 }))
+  await titled($, clock, 'SessionStart', 'session-a', 'Checkout retry')
+  await start($, clock)
+  // The router did not answer the title's set, so its owed mark stands when the session clears.
+  expect(router.values.get('facts')).toMatchObject({ id: 'session-a', factsOwed: true })
+  await end($, clock, 'clear', 'session-a')
+  router.setId('session-b')
+  await prompt($, clock)
+  // The backoff of the refused set outlasts the clear, so a set that the new session owed would wait for it.
+  await clock.advance(1000)
+  expect(under(router, 'session-b')).toEqual(['session_start', 'activity'])
+})
+
 test('an agent\'s facts follow its start again where the router lost its record', AGENTS, async ($, on) => {
   const { clock, router } = host(on)
   router.setAgents([{ id: 'worker-1', status: 'running', ...REVIEWER_ROW }])
