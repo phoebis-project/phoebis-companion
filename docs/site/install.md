@@ -87,5 +87,8 @@ at the next start of the session ([Reported facts](reports.md#reported-facts)). 
 the branch, the project directory, the repository as `host/path`, the repository's root and the working directory of the
 session. This option needs Session reports on too. Turned off, it clears what it reported at the next start of the
 session. With Agent reports on, the mod reports each subagent's description, its type and its name. It needs Session
-reports on as well and clears what it reported once it is turned off. Each of these options works on every client the
-mod loads on, and where a client lacks what a fact is read from, the mod leaves that fact out and reports the rest.
+reports on as well. Turned off, it drops what it reported at the session's next registration: a running session
+registers again when the option changes, and a session that does not run registers at its next start. A session that
+nobody starts again keeps its agents' names, types and descriptions until the router's request retention, 365 days by
+default. Each of these options works on every client the mod loads on, and where a client lacks what a fact is read
+from, the mod leaves that fact out and reports the rest.
