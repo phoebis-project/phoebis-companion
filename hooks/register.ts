@@ -1,6 +1,6 @@
 import type { Register } from 'claude-code'
 import { answerCall, errorAnswer, retireStarts, startCheck, TOOL_CALL } from './allowance'
-import { clearSettings, emptyQueue, installKeepalive, startKeepalive } from './keepalive'
+import { clearSettings, emptyQueue, installReporting, startReporting } from './reporting'
 import { errorText, optionsOf, redactSecrets, resolveSettings, say, urlProblem } from './settings'
 import type { Resolution, Settings } from './settings'
 
@@ -44,7 +44,7 @@ export const register: Register = (on, options) => {
     // front of the router, and says nothing about whether the key may read the allowance, which the tool's own route
     // answers. A start that has not yet installed its settings holds settings of its own, so a refusal of the settings
     // it replaced leaves that start current.
-    installKeepalive(on, (status, under) => {
+    installReporting(on, (status, under) => {
       if (status === 401 && current === under) current = undefined
     }, config.facts, config.cacheWarming)
   }
@@ -119,7 +119,7 @@ export const register: Register = (on, options) => {
       // it inside the check, so this start leaves it.
       if (outcome === 'stale' || current !== resolution.settings) return next(e)
       if (config.reports) {
-        await startKeepalive($, resolution.settings, () => current === resolution.settings)
+        await startReporting($, resolution.settings, () => current === resolution.settings)
       }
       return next(e)
     } catch (error) {

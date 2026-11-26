@@ -9,8 +9,8 @@ import type {
   ToolCallInput,
 } from 'claude-code'
 import type { AgentFactSet, Identity, SavedAgent, SavedModel, SavedTask, SessionFactSet } from '../types'
-import { agentFactSet, sameFacts, sessionFactSet } from './facts'
-import type { SessionRead } from './facts'
+import { agentFactSet, sameFacts, sessionFactSet } from './fact-rules'
+import type { SessionRead } from './fact-rules'
 import {
   agentOf,
   collapse,
@@ -1496,7 +1496,7 @@ async function fence($: EngineInterface, isCurrent: () => boolean): Promise<Iden
  * Starts the lifecycle: the fence, the registration, the pump. Idempotent per session start. `isCurrent` answers
  * whether the start that resolved these settings still holds the configuration.
  */
-export async function startKeepalive($: EngineInterface, resolved: Settings, isCurrent: () => boolean):
+export async function startReporting($: EngineInterface, resolved: Settings, isCurrent: () => boolean):
   Promise<void> {
   // The earlier settings hold through every await here. Replaced sooner, they would let a pump register the record of
   // an older id that ensureSession is about to replace.
@@ -1534,7 +1534,7 @@ export function clearSettings(): void {
   settings = undefined
 }
 
-export function installKeepalive(on: On, refused: RefusalHandler, facts: FactOptions, warming: boolean): void {
+export function installReporting(on: On, refused: RefusalHandler, facts: FactOptions, warming: boolean): void {
   onRefused = refused
   factOptions = facts
   cacheWarming = warming

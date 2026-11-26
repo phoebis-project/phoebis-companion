@@ -1,7 +1,7 @@
 import type { AgentFactSet, Identity, SavedAgent, SavedCron, SavedTask, SessionFactSet } from '../types'
 
 // The rules the lifecycle computes with. Nothing here holds state: the session, the queue and the tracked work
-// belong to keepalive.ts.
+// belong to reporting.ts.
 
 /** A kind of reported fact, by the option that switches it. */
 export type FactKind = 'agents' | 'project' | 'title'

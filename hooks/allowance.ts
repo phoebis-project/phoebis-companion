@@ -155,7 +155,7 @@ async function registerTool($: EngineInterface): Promise<boolean> {
     })
     return true
   } catch (error) {
-    // A registration the engine refuses costs the tool alone, never the keepalive start that follows it.
+    // A registration the engine refuses costs the tool alone, never the reporting start that follows it.
     say($, `the allowance tool could not be registered (${errorText(error)})`, { to: 'debug' })
     return false
   }

@@ -1,6 +1,6 @@
 import type { EngineInterface, PluginOptions } from 'claude-code'
 
-// The settings layer and the helpers the two hooks modules share. keepalive.ts and allowance.ts both import it, so the
+// The settings layer and the helpers the two hooks modules share. reporting.ts and allowance.ts both import it, so the
 // allowance tool, which runs with the reports switched off, depends on nothing in the lifecycle.
 
 const CREDENTIAL = 'a URL with a username or password'
