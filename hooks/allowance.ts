@@ -1,5 +1,5 @@
 import type { EngineInterface } from 'claude-code'
-import { bearer, errorText, parsed, redactSecrets, say } from './settings'
+import { bearer, errorText, noAnswerWithin, parsed, redactSecrets, say } from './settings'
 import type { Settings } from './settings'
 
 // The start check and the allowance tool: one GET of the allowance route at session start settles whether a router
@@ -94,7 +94,7 @@ async function fetchAllowance($: EngineInterface, settings: Settings, sessionId:
 function fetchWithin($: EngineInterface, settings: Settings, sessionId: string): Promise<Fetched> {
   return Promise.race([
     fetchAllowance($, settings, sessionId),
-    $.clock.sleep(WAIT_MS).then((): Fetched => ({ failure: `no answer within ${WAIT_MS / 1000} seconds` })),
+    $.clock.sleep(WAIT_MS).then((): Fetched => ({ failure: noAnswerWithin(WAIT_MS) })),
   ])
 }
 

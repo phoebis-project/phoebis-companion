@@ -1,5 +1,5 @@
 import type { AgentInfo, ClassicEventOf, EngineInterface, Frozen, On } from 'claude-code'
-import type { AgentFactSet, SavedAgentFacts, SavedFacts, SessionFactSet } from '../types'
+import type { AgentFactSet, SavedAgentFacts, SavedFacts, SavedSlot, SessionFactSet } from '../types'
 import { agentFactSet, sameFacts, sessionFactSet } from './fact-rules'
 import type { SessionRead } from './fact-rules'
 import type { FactKind, Report } from './rules'
@@ -13,14 +13,16 @@ import type { FactOptions } from './settings'
 
 export type SessionFactsRead = { number: number; set: SessionFactSet }
 
-type FactsSlot<T> = { factsQueued: T | undefined; factsOwed: boolean }
-type AgentSlot = {
-  /** What the client last said of the agent, cleaned. Empty with the option off. */
-  facts: AgentFactSet
-  /** The set last queued for the agent, undefined while none was or once the router refused it as unknown. */
-  factsQueued: AgentFactSet | undefined
+type FactsSlot<T> = {
+  /** The set last queued, undefined while none was. */
+  factsQueued: T | undefined
   /** The router has not answered the last set queued for good. */
   factsOwed: boolean
+}
+// An agent's queued set is undefined also once the router refused it as unknown.
+type AgentSlot = FactsSlot<AgentFactSet> & {
+  /** What the client last said of the agent, cleaned. */
+  facts: AgentFactSet
 }
 
 let factOptions: FactOptions = { agents: false, project: false, title: false }
@@ -73,11 +75,7 @@ function noteTitle(e: Frozen<ClassicEventOf['classic.SessionStart'] |
 
 // The kinds whose option is on, in alphabetical order, so two registrations of one option set carry one body.
 export function reportedKinds(): FactKind[] {
-  const kinds: FactKind[] = []
-  if (factOptions.agents) kinds.push('agents')
-  if (factOptions.project) kinds.push('project')
-  if (factOptions.title) kinds.push('title')
-  return kinds
+  return (Object.keys(factOptions) as FactKind[]).filter((kind) => factOptions[kind]).sort()
 }
 
 /** Empties each slot and drops the title seen of each session other than the one installed. */
@@ -89,20 +87,23 @@ export function resetFacts(sessionId: string): void {
   for (const id of [...seenTitles.keys()]) if (id !== sessionId) seenTitles.delete(id)
 }
 
-const PROJECT_MEMBERS = ['branch', 'cwd', 'project', 'repository', 'repository_root'] as const
+// The table's order is the member order of a restored set, and so of its saved text.
+const MEMBER_KINDS = {
+  title: 'title',
+  branch: 'project', cwd: 'project', project: 'project', repository: 'project', repository_root: 'project',
+} as const satisfies Record<keyof SessionFactSet, FactKind>
 
 // The members of a saved set whose kind is on. The registration's list states a kind that is off, so its members
 // do not come back.
 function keptFacts(saved: SessionFactSet): SessionFactSet {
   const kept: SessionFactSet = {}
-  if (factOptions.title && saved.title !== undefined) kept.title = saved.title
-  if (factOptions.project) {
-    for (const member of PROJECT_MEMBERS) if (saved[member] !== undefined) kept[member] = saved[member]
+  for (const member of Object.keys(MEMBER_KINDS) as (keyof SessionFactSet)[]) {
+    if (factOptions[MEMBER_KINDS[member]] && saved[member] !== undefined) kept[member] = saved[member]
   }
   return kept
 }
 
-function restoreSlot<T>(slot: FactsSlot<T>, saved: { facts?: T; factsOwed?: true }): void {
+function restoreSlot<T>(slot: FactsSlot<T>, saved: SavedSlot<T>): void {
   slot.factsQueued = saved.facts
   slot.factsOwed = saved.factsOwed === true
 }
@@ -110,22 +111,18 @@ function restoreSlot<T>(slot: FactsSlot<T>, saved: { facts?: T; factsOwed?: true
 // The saved sets back in their slots, under the options. An entry of an agent the restored work does not hold is
 // left out, so the slots and the records stay in step.
 export function restoreFacts(saved: SavedFacts): void {
-  if (factOptions.agents) {
-    for (const entry of saved.agents) {
-      const record = agents.get(entry.id)
-      if (record === undefined) continue
-      restoreSlot(record, entry)
-      // No spawn fires again at a reload, so the saved set stands until the list's next read.
-      if (entry.facts !== undefined) record.facts = entry.facts
-    }
+  for (const entry of saved.agents) {
+    const record = agents.get(entry.id)
+    if (record === undefined) continue
+    restoreSlot(record, entry)
+    // No spawn fires again at a reload, so the saved set stands until the list's next read.
+    if (entry.facts !== undefined) record.facts = entry.facts
   }
   // The saved set does not say which members owed the mark, so the mark comes back while either kind is on. The
   // one report that it costs carries the present set.
   if (factOptions.project || factOptions.title) {
-    restoreSlot(session, {
-      ...(saved.facts === undefined ? {} : { facts: keptFacts(saved.facts) }),
-      ...(saved.factsOwed === true ? { factsOwed: true as const } : {}),
-    })
+    session.factsQueued = saved.facts === undefined ? undefined : keptFacts(saved.facts)
+    session.factsOwed = saved.factsOwed === true
   }
   // No title event fires again at a reload, so the saved title stands until the next one. An event that saw the
   // session in this activation is newer than the save, also where it carried no title.
@@ -134,7 +131,7 @@ export function restoreFacts(saved: SavedFacts): void {
   }
 }
 
-function savedSlot<T>(slot: FactsSlot<T>): { facts?: T; factsOwed?: true } {
+function savedSlot<T>(slot: FactsSlot<T>): SavedSlot<T> {
   return {
     ...(slot.factsQueued === undefined ? {} : { facts: { ...slot.factsQueued } }),
     ...(slot.factsOwed ? { factsOwed: true as const } : {}),
@@ -150,13 +147,16 @@ export function savedFacts(id: string): SavedFacts {
   return { id, agents: entries, ...savedSlot(session) }
 }
 
+// An agent gets a slot with the option on alone, and each read, send and restore of its set needs one, so a default
+// install reads none of a row's members. The registration's list states a kind that is off, so no report of that kind
+// goes out.
 export function agentJoined(id: string): void {
+  if (!factOptions.agents) return
   agents.set(id, { facts: {}, factsQueued: undefined, factsOwed: false })
 }
 
-// A row's members are read with the option on alone, so a default install reads none of them.
 function listedFacts(info: AgentInfo): AgentFactSet {
-  return factOptions.agents ? agentFactSet({ description: info.description, name: info.name, type: info.type }) : {}
+  return agentFactSet({ description: info.description, name: info.name, type: info.type })
 }
 
 export function agentListed(id: string, info: AgentInfo): void {
@@ -167,19 +167,16 @@ export function agentListed(id: string, info: AgentInfo): void {
 export function agentSpawned(id: string,
   call: { description?: unknown; name?: unknown; subagentType?: unknown }): void {
   const agent = agents.get(id)
-  if (factOptions.agents && agent !== undefined) {
+  if (agent !== undefined) {
     agent.facts = agentFactSet({ description: call.description, name: call.name, type: call.subagentType })
   }
 }
 
-// Answers the agent's report where its set goes out. Only an agent the router acknowledged gets one, since the router
-// answers facts ahead of a start as it answers any report of an agent it does not hold. `whole` is the send behind an
-// acknowledged start or registration, where the router's record may be a new one.
-export function agentReport(id: string, announced: boolean, whole: boolean): Report | undefined {
-  // The registration's list states a kind that is off, so no report of that kind goes out.
-  if (!factOptions.agents) return undefined
+// Answers the agent's report where its set goes out. `whole` is the send behind an acknowledged start or registration,
+// where the router's record may be a new one.
+export function agentReport(id: string, whole: boolean): Report | undefined {
   const agent = agents.get(id)
-  if (agent === undefined || !announced) return undefined
+  if (agent === undefined) return undefined
   return queueFacts(agent, agent.facts, whole, { event: 'agent_facts', agent_id: id, ...agent.facts })
 }
 
@@ -201,8 +198,10 @@ export function agentLeft(id: string, release: Report | undefined): void {
   agents.delete(id)
 }
 
-export function closingSet(release: Report): AgentFactSet | undefined {
-  return closingSets.get(release)
+export function closingReport(release: Report): Report | undefined {
+  const facts = closingSets.get(release)
+  if (facts === undefined || release.event !== 'state') return undefined
+  return { event: 'agent_facts', agent_id: release.agent_id, ...facts }
 }
 
 export function agentRefused(id: string): void {
@@ -267,7 +266,7 @@ async function readPlace($: EngineInterface): Promise<SessionRead> {
 export function readSession($: EngineInterface, sessionId: string): SessionFactsRead | Promise<SessionFactsRead> {
   const number = ++factReads
   const finish = (read: SessionRead): SessionFactsRead => {
-    if (factOptions.title && seenTitles.has(sessionId)) read.title = seenTitles.get(sessionId)
+    if (seenTitles.has(sessionId)) read.title = seenTitles.get(sessionId)
     return { number, set: sessionFactSet(read) }
   }
   // A read of a title alone awaits nothing, so its set enters the queue in the caller's own step.

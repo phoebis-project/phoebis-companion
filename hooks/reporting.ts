@@ -21,7 +21,7 @@ import {
   agentRefused,
   agentReport,
   agentSpawned,
-  closingSet,
+  closingReport,
   installFacts,
   readSession,
   registrationAcknowledged,
@@ -54,7 +54,7 @@ import {
   samePark,
 } from './rules'
 import type { AgentRecord, Body, Cron, Park, Report } from './rules'
-import { bearer, errorText, guarded, parsed, redactSecrets, say } from './settings'
+import { bearer, errorText, guarded, noAnswerWithin, parsed, redactSecrets, say } from './settings'
 import type { FactOptions, Settings } from './settings'
 
 const MAIN = 'main'
@@ -355,8 +355,9 @@ function release(agentId: string): void {
 
 // A live agent the mod meets first in the client's list or the router's answer (one that ran before this load, or one
 // resumed after its release) joins its parent's open set, so the parent stays parked on it until it ends.
-function adopt(agentId: string, parentId: string | undefined, state: AgentRecord['state'], info: AgentInfo): void {
-  const parent = parentId ?? MAIN
+function adopt(info: AgentInfo, state: AgentRecord['state']): void {
+  const agentId = info.id
+  const parent = info.parentId ?? MAIN
   const agent = freshRecord(agentId, state, parent)
   agentListed(agentId, info)
   model.released.delete(agentId)
@@ -387,7 +388,7 @@ async function attribute($: EngineInterface, agentId: string | undefined): Promi
   if (session !== record) return undefined
   const info = listed?.find((agent) => agent.id === agentId)
   if (info !== undefined) {
-    adopt(agentId, info.parentId, 'idle', info)
+    adopt(info, 'idle')
     return agentId
   }
   // An unreadable list judges nothing, so the loop's next event asks again.
@@ -486,14 +487,13 @@ async function toolRan($: EngineInterface, agentId: string, e: Frozen<ToolCallIn
   }
 }
 
-function spawned(agentId: string, parentId: string): AgentRecord {
+function spawned(agentId: string, parentId: string): void {
   // A step that reached the mod before the client's list named the agent counted it for main until now.
   model.unlisted.delete(agentId)
   model.released.delete(agentId)
-  let agent = model.agents.get(agentId)
+  const agent = model.agents.get(agentId)
   if (agent === undefined) {
-    agent = freshRecord(agentId, 'busy', parentId)
-    model.agents.set(agentId, agent)
+    model.agents.set(agentId, freshRecord(agentId, 'busy', parentId))
     announce(agentId)
   } else {
     // A step of the subagent's own loop reached the mod before its spawn answered, and announced it then.
@@ -501,7 +501,6 @@ function spawned(agentId: string, parentId: string): AgentRecord {
   }
   const parent = model.agents.get(parentId)
   if (parent !== undefined) change(parent, () => parent.open.set(agentId, { id: agentId, kind: 'subagent' }))
-  return agent
 }
 
 // An unlisted loop's turn end rests the agent it counts for, unless that agent's own turn still runs.
@@ -617,7 +616,7 @@ function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): voi
     const at = live.findIndex((info) => !live.some((other) => other.id === (info.parentId ?? MAIN)))
     const [info] = live.splice(at < 0 ? 0 : at, 1)
     if (info === undefined) break
-    adopt(info.id, info.parentId, 'busy', info)
+    adopt(info, 'busy')
     report(info.id, 'busy')
   }
   for (const agent of [...model.agents.values()]) {
@@ -689,17 +688,9 @@ function restoreModel(saved: SavedModel, sessionRecord: SessionRecord): void {
   mainAgent()
 }
 
-function heldModelFor(held: unknown, id: string): SavedModel | undefined {
-  if (field(held, 'id') !== id || !Array.isArray(field(held, 'agents')) || !Array.isArray(field(held, 'crons')) ||
-    !Array.isArray(field(held, 'released')) || !Array.isArray(field(held, 'routerReleased'))) {
-    return undefined
-  }
-  return held as SavedModel
-}
-
-function heldFactsFor(held: unknown, id: string): SavedFacts | undefined {
-  if (field(held, 'id') !== id || !Array.isArray(field(held, 'agents'))) return undefined
-  return held as SavedFacts
+function heldFor<T>(held: unknown, id: string, lists: readonly string[]): T | undefined {
+  if (field(held, 'id') !== id || !lists.every((name) => Array.isArray(field(held, name)))) return undefined
+  return held as T
 }
 
 /**
@@ -802,8 +793,8 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
   // its tracked work. A new id is a new conversation, so nothing the old one had open or scheduled carries over. Read
   // before the session moves, so a pump during the read never writes the old session's work under the new id.
   const [work, sets] = await Promise.all([$.state.get(MODEL_REF), $.state.get(FACTS_REF)])
-  const held = heldModelFor(work.value, id)
-  const heldFacts = heldFactsFor(sets.value, id)
+  const held = heldFor<SavedModel>(work.value, id, ['agents', 'crons', 'released', 'routerReleased'])
+  const heldFacts = heldFor<SavedFacts>(sets.value, id, ['agents'])
   // The host can leave the session while the read above is out and begin no transition, since a clear or a resume
   // raises no start. The session this caller read is then one the host left, so it installs nothing.
   if (await $.session.id() !== id) return true
@@ -901,7 +892,7 @@ async function pump($: EngineInterface): Promise<void> {
       } finally {
         limit.abort()
       }
-      if (response === undefined) throw new Error(`no answer within ${REQUEST_LIMIT_MS / 1000} seconds`)
+      if (response === undefined) throw new Error(noAnswerWithin(REQUEST_LIMIT_MS))
     } catch (error) {
       // The client refuses a plugin's fetch inside the process when its policy check failed, and a refused host
       // throws the same way, so the one sign of either is this line: the backoff below retries all the same. The
@@ -969,10 +960,12 @@ async function readSessionFacts($: EngineInterface): Promise<void> {
   void pump($)
 }
 
-// Queues the agent's set where the facts module hands one back. The record's own `announced` says whether the
-// router acknowledged the agent, and main reports no set.
+// Queues the agent's set where the facts module hands one back. Only an agent the router acknowledged gets one, since
+// the router answers facts ahead of a start as it answers any report of an agent it does not hold. The record's own
+// `announced` says whether the router acknowledged the agent, and main reports no set.
 function sendAgentFacts(record: SessionRecord, id: string, whole: boolean): void {
-  const report = id === MAIN ? undefined : agentReport(id, record.announced.has(id), whole)
+  if (id === MAIN || !record.announced.has(id)) return
+  const report = agentReport(id, whole)
   if (report !== undefined) queue.reports = collapse(queue.reports, report)
 }
 
@@ -1140,10 +1133,8 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
     } else {
       // The run ended while its start was out, so the agent stays out of `announced` and its record is gone. The
       // router holds the run until the queued release arrives, and the set the run left goes right ahead of it.
-      const last = closingSet(queue.reports[at] as Report)
-      if (last !== undefined) {
-        queue.reports.splice(at, 0, { event: 'agent_facts', agent_id: report.agent_id, ...last })
-      }
+      const last = closingReport(queue.reports[at] as Report)
+      if (last !== undefined) queue.reports.splice(at, 0, last)
     }
   }
   if (report.event === 'state' && report.state === 'released') {
@@ -1160,7 +1151,7 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
   const track = isFacts(report) ? queue.facts : queue.lifecycle
   track.attempt = 0
   track.retryAt = undefined
-  if (isFacts(report)) settled(report)
+  settled(report)
   if (report.event === 'session_start') {
     // An answer without the member says nothing about the router's agents, so nothing is reconciled against it.
     if (ack.agents !== undefined) reconcileAck(ack.agents, listed)

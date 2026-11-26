@@ -26,12 +26,13 @@ export type SessionFactSet = {
 }
 export type SavedModel = { id: string; agents: SavedAgent[]; crons: SavedCron[]; released: string[];
   routerReleased: string[] }
+export type SavedSlot<T> = { facts?: T; factsOwed?: true }
 // `facts` is the last set queued for the agent, and `factsOwed` stands while the router has not answered that set
 // for good. An agent with neither has no entry.
-export type SavedAgentFacts = { id: string; facts?: AgentFactSet; factsOwed?: true }
+export type SavedAgentFacts = { id: string } & SavedSlot<AgentFactSet>
 // The sets the mod last queued, under a state value of their own, so that a read behind a reload sends a change
 // alone and a clear the router has not confirmed goes out again. `factsOwed` stands for an empty set too.
-export type SavedFacts = { id: string; agents: SavedAgentFacts[]; facts?: SessionFactSet; factsOwed?: true }
+export type SavedFacts = { id: string; agents: SavedAgentFacts[] } & SavedSlot<SessionFactSet>
 declare module 'claude-code' {
   interface PluginState { 'phoebis-companion': { facts: SavedFacts; identity: Identity; model: SavedModel } }
 }

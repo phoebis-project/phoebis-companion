@@ -1,10 +1,11 @@
 import type { AgentFactSet, Identity, SavedAgent, SavedCron, SavedTask, SessionFactSet } from '../types'
+import type { FactOptions } from './settings'
 
 // The rules the lifecycle computes with. Nothing here holds state: the session, the queue and the tracked work
 // belong to reporting.ts.
 
 /** A kind of reported fact, by the option that switches it. */
-export type FactKind = 'agents' | 'project' | 'title'
+export type FactKind = keyof FactOptions
 
 export type Report =
   | { event: 'session_start'; reported_facts: FactKind[]; cache_warming: boolean; previous_instance_id?: string }

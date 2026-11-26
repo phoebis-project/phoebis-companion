@@ -136,6 +136,10 @@ export function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+export function noAnswerWithin(ms: number): string {
+  return `no answer within ${ms / 1000} seconds`
+}
+
 export function parsed(text: string): Record<string, unknown> {
   try {
     const value: unknown = JSON.parse(text)
