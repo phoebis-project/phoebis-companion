@@ -68,7 +68,7 @@ const FACTS_REF = { plugin: 'phoebis-companion', key: 'facts' } as const
 // The plugin's store outlives the session the host's state belongs to, so it keeps each client process's instance for
 // a reload under a later session id of that process. An ended process's entry is never read again, so the store keeps
 // the newest alone.
-const IDENTITIES = 'identities'
+const IDENTITY_PREFIX = 'identity:'
 const KEPT_IDENTITIES = 8
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000]
 // A request with no answer by then counts as a failed send. Ten seconds leave five tries of a heartbeat inside one
@@ -1328,37 +1328,43 @@ async function processIdentity($: EngineInterface): Promise<string | undefined> 
   return id
 }
 
-type StoredPair = [string, Identity]
-
-// A list, newest last, rather than an object keyed by process: an object orders integer-like keys by value. Any
-// process of the user's can write the store, so an entry of another shape is dropped.
-async function storedPairs($: EngineInterface): Promise<StoredPair[]> {
-  const value = await guarded(() => $.store.get(IDENTITIES))
-  if (!Array.isArray(value)) return []
-  const pairs: StoredPair[] = []
-  for (const entry of value) {
-    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') continue
-    const instance = field(entry[1], 'instance')
-    if (typeof instance === 'string') pairs.push([entry[0], { instance }])
-  }
-  return pairs
+// A key of its own for each process, so no write of one process can drop the entry of another. The prefix keeps the
+// key from reading as an integer, which the host orders by value ahead of the insertion order.
+function identityKey(processId: string): string {
+  return IDENTITY_PREFIX + processId
 }
 
-async function keepPair($: EngineInterface, pairs: StoredPair[], processId: string, own: Identity): Promise<void> {
-  const added: StoredPair = [processId, { instance: own.instance }]
-  const kept: StoredPair[] = [...pairs.filter(([id]) => id !== processId), added].slice(-KEPT_IDENTITIES)
-  if (JSON.stringify(kept) === JSON.stringify(pairs)) return
-  // A store the host refuses to write costs the reuse after a clear alone, never the fence.
-  await guarded(() => $.store.set(IDENTITIES, kept))
+// Any process of the user's can write the store, so a value of another shape reads as none.
+async function storedIdentity($: EngineInterface, processId: string): Promise<Identity | undefined> {
+  const instance = field(await guarded(() => $.store.get(identityKey(processId))), 'instance')
+  return typeof instance === 'string' ? { instance } : undefined
+}
+
+// A store the host refuses to read or to write costs the reuse after a clear alone, never the fence.
+async function storeIdentity($: EngineInterface, isCurrent: () => boolean, processId: string, own: Identity,
+  stored: Identity | undefined): Promise<void> {
+  const key = identityKey(processId)
+  const keys = ((await guarded(() => $.store.keys())) ?? []).filter((name) => name.startsWith(IDENTITY_PREFIX))
+  if (stored?.instance === own.instance && keys[keys.length - 1] === key) return
+  // The host answers the keys in insertion order, and a set of a key that exists keeps its place, so the key takes
+  // the newest place through a delete and a set.
+  if (keys.includes(key) && isCurrent()) await guarded(() => $.store.delete(key))
+  if (!isCurrent()) return
+  await guarded(() => $.store.set(key, { instance: own.instance }))
+  // The prune deletes only keys the one read named, so a key another process set meanwhile stays.
+  const older = keys.filter((name) => name !== key)
+  for (const name of older.slice(0, Math.max(0, older.length - (KEPT_IDENTITIES - 1)))) {
+    if (isCurrent()) await guarded(() => $.store.delete(name))
+  }
 }
 
 // A later start owns the identity the relay must read, so each write goes out only while this start is current,
 // checked in the step that issues it.
 async function writeIdentity($: EngineInterface, isCurrent: () => boolean, own: Identity, held: Identity | undefined,
-  existing: string | undefined, pairs: StoredPair[], processId: string | undefined): Promise<void> {
+  existing: string | undefined, stored: Identity | undefined, processId: string | undefined): Promise<void> {
   // An instance the fence reused from the host's state is there already.
   if (own !== held && isCurrent()) await $.state.set(IDENTITY_REF, own)
-  if (processId !== undefined && isCurrent()) await keepPair($, pairs, processId, own)
+  if (processId !== undefined && isCurrent()) await storeIdentity($, isCurrent, processId, own, stored)
   // The line replaces any line of the header before it, so the relay reads one instance whatever the variable
   // inherited.
   if (isCurrent()) await $.env.set('ANTHROPIC_CUSTOM_HEADERS', instanceHeaderLines(existing, own.instance))
@@ -1373,17 +1379,16 @@ async function fence($: EngineInterface, isCurrent: () => boolean): Promise<Iden
   ])
   const named = instanceOf(existing)
   const processId = await processIdentity($)
-  const pairs = processId === undefined ? [] : await storedPairs($)
+  const stored = processId === undefined ? undefined : await storedIdentity($, processId)
   let own: Identity
   if (held !== undefined && reusable(held, named)) {
     own = held
   } else {
     // The host's state belongs to the session, so after a clear it holds nothing under the new id until the first
     // prompt there, and the store's entry for this process is what still shows the instance was minted here.
-    const stored = pairs.find(([id]) => id === processId)?.[1]
     own = stored !== undefined && reusable(stored, named) ? stored : { instance: crypto.randomUUID() }
   }
-  const run = fenceWrites.then(() => writeIdentity($, isCurrent, own, held, existing, pairs, processId))
+  const run = fenceWrites.then(() => writeIdentity($, isCurrent, own, held, existing, stored, processId))
   // A fence whose writes reject must not stall the ones after it.
   fenceWrites = run.catch(() => undefined)
   await run

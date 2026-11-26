@@ -174,14 +174,14 @@ instance is the process.
 
 Claude Code holds the plugin's own state per session, and that state survives a hot reload of the module. The mod keeps
 the instance in that state under each session id it adopts: at session start, and at the first prompt after a `/clear`
-or a `/resume` moves the process to another id. The mod also keeps the instance in the plugin's store under the key
-`identities`, beside the identity of the client process it was minted in, for the newest eight processes. The store
-outlives the session, so a reload that comes before the first prompt under a new id finds the instance there while the
-store's list still holds the process. A reload reuses the instance while the header line still names it, so the line
-stays as it is, and the router's session keeps its instance. A child process inherits the line but runs as another
-process, for which the store holds no instance, so it mints its own and registers under it. Where Claude Code cannot run
-the command that reads the process's identity, a reload that comes before the first prompt under a new id mints a new
-instance. A child process that never runs the fence keeps the parent's line: one on a client that does not load the mod
+or a `/resume` moves the process to another id. The mod also keeps the instance in the plugin's store under one key for
+each client process, `identity:<process id>`, for the newest eight processes. The store outlives the session, so a
+reload that comes before the first prompt under a new id finds the instance there while the store still holds the key of
+the process. A reload reuses the instance while the header line still names it, so the line stays as it is, and the
+router's session keeps its instance. A child process inherits the line but runs as another process, for which the store
+holds no instance, so it mints its own and registers under it. Where Claude Code cannot run the command that reads the
+process's identity, a reload that comes before the first prompt under a new id mints a new instance. A child process
+that never runs the fence keeps the parent's line: one on a client that does not load the mod
 ([Install](install.md#install)), one with the mod disabled, or one without a URL or a key. That line matters only for a
 child that sends the parent's session id.
 
@@ -203,6 +203,6 @@ also runs `git symbolic-ref --short -q HEAD` to read the branch, and it runs no 
 settings-hook events, `classic.Stop` and `classic.SubagentStop`, for the background list they carry. With Session title
 reports on it also hooks `classic.SessionStart` and `classic.UserPromptSubmit` and reads their title member and their
 session id alone, never a prompt's text. It reads no transcript, no background command's output and no conversation
-text. It reads no file. It keeps the key `identities` in its own store, which Claude Code holds as a file under the
-user's configuration directory, and its settings live where Claude Code keeps a plugin's configuration, the Router key
-in its secure storage.
+text. It reads no file. It keeps the keys `identity:<process id>` in its own store, which Claude Code holds as a file
+under the user's configuration directory, and its settings live where Claude Code keeps a plugin's configuration, the
+Router key in its secure storage.

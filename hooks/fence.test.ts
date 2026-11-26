@@ -21,6 +21,8 @@ const HELD: Identity = { instance: 'i-1' }
 // Two client processes as `echo $PPID` prints them, long enough that no minted uuid or sequence holds either by chance.
 const PROCESS = '3141592'
 const CHILD = '2718281'
+const PROCESS_KEY = 'identity:3141592'
+const CHILD_KEY = 'identity:2718281'
 
 const ok = (body: unknown): Reply => ({ status: 200, body })
 
@@ -157,7 +159,7 @@ test('a reload under a later session id of the same process reuses the instance 
     // A clear moved the process to a session id under which the host's state holds nothing, so the store's entry for
     // the process is the one record of the instance.
     const other: Identity = { instance: 'i-2' }
-    const store = { identities: [[PROCESS, HELD], [CHILD, other]] }
+    const store = { [PROCESS_KEY]: HELD, [CHILD_KEY]: other }
     const { clock, router } = processHost(on, INHERITED, { process: PROCESS, store })
     await start($, clock)
     await prompt($, clock)
@@ -166,8 +168,7 @@ test('a reload under a later session id of the same process reuses the instance 
       instance_id: 'i-1' })
     // The state takes the instance beside the store, so the next reload under this id reads it there.
     expect(router.state).toEqual(HELD)
-    expect(router.store.get('identities'), 'the reused instance is the newest')
-      .toEqual([[CHILD, other], [PROCESS, HELD]])
+    expect([...router.store], 'the reused instance is the newest').toEqual([[CHILD_KEY, other], [PROCESS_KEY, HELD]])
     // A second start in the same load reads no process again.
     await start($, clock)
     expect(router.commands).toEqual([['sh', '-c', 'echo $PPID']])
@@ -175,19 +176,19 @@ test('a reload under a later session id of the same process reuses the instance 
     keptInStore(router, PROCESS)
   })
 
-test('a start after a clear in the same process keeps the instance once the store\'s list no longer holds the process',
+test('a start after a clear in the same process keeps the instance once the store no longer holds the process',
   CONFIGURED, async ($, on) => {
     mock.env(on, INHERITED)
     const clock = mock.clock(on, { now: RELOAD_AT })
     const router = fakeRouter(on, clock, { id: 'session-a', state: HELD, process: PROCESS,
-      store: { identities: [[PROCESS, HELD]] } })
+      store: { [PROCESS_KEY]: HELD } })
     await start($, clock)
     // A clear raises no start, so the prompt is what moves the mod to the new id.
     router.setId('session-b')
     await prompt($, clock)
-    // The fences of eight later processes push this one out of the store's list.
-    router.store.set('identities', Array.from({ length: 8 }, (_, at) =>
-      [String(1000001 + at), { instance: `other-${at}` }]))
+    // The fences of eight later processes push this one out of the store.
+    router.store.delete(PROCESS_KEY)
+    for (let at = 0; at < 8; at += 1) router.store.set(`identity:${1000001 + at}`, { instance: `other-${at}` })
     // The fence picks its instance from the host's state, the header line, the store and the process id, and a reload
     // reads each of them again to the same value, so a second start in the load decides as a reload does.
     await start($, clock)
@@ -209,7 +210,7 @@ test('a start replaced while its fence reads writes none of its identity', CONFI
   const instance = nth(registrations(router), 0).instance_id
   expect(router.envWrites).toEqual([{ name: HEADERS, value: `X-Phoebis-Instance-Id: ${instance}` }])
   expect(router.state).toEqual({ instance })
-  expect(router.store.get('identities')).toEqual([[PROCESS, { instance }]])
+  expect([...router.store]).toEqual([[PROCESS_KEY, { instance }]])
 })
 
 test('a replaced start\'s header write that the host lands late comes before the current start\'s identity',
@@ -250,7 +251,7 @@ test('a state write the host refuses when a prompt adopts a new id leaves the ne
     mock.env(on, INHERITED)
     const clock = mock.clock(on, { now: RELOAD_AT })
     const router = fakeRouter(on, clock, { id: 'session-a', state: HELD, process: PROCESS,
-      store: { identities: [[PROCESS, HELD]] } })
+      store: { [PROCESS_KEY]: HELD } })
     await start($, clock)
     router.setId('session-b')
     // The host refuses the write that keeps the instance under the id the prompt adopts.
@@ -265,17 +266,32 @@ test('a state write the host refuses when a prompt adopts a new id leaves the ne
 
 test('a child process mints its own instance beside the one the store keeps for its parent', CONFIGURED,
   async ($, on) => {
-    const { clock, router } = processHost(on, INHERITED, { process: CHILD, store: { identities: [[PROCESS, HELD]] } })
+    const { clock, router } = processHost(on, INHERITED, { process: CHILD, store: { [PROCESS_KEY]: HELD } })
     await start($, clock)
     await prompt($, clock)
     const instance = minted(router)
     expect(instance).toMatch(V4)
     expect(router.envWrites).toEqual([{ name: HEADERS, value: `X-B: 2\nX-Phoebis-Instance-Id: ${instance}` }])
     expect(router.state).toEqual({ instance })
-    expect(router.store.get('identities')).toEqual([[PROCESS, HELD], [CHILD, { instance }]])
+    expect([...router.store]).toEqual([[PROCESS_KEY, HELD], [CHILD_KEY, { instance }]])
     expect(JSON.stringify(router.requests)).not.toContain('i-1')
     keptInStore(router, PROCESS)
     keptInStore(router, CHILD)
+  })
+
+test('an entry that another process writes while a fence is between its read and its write stays in the store',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = processHost(on, { ANTHROPIC_AUTH_TOKEN: KEY }, { process: CHILD })
+    // The fence has read the empty store when the host holds its identity write, which comes ahead of its store write.
+    router.delayIdentityWrite(1000)
+    const starting = $.session.start({ cwd: '/tmp/probe-ws', surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    // The parent's fence writes its entry meanwhile.
+    router.store.set(PROCESS_KEY, HELD)
+    await clock.advance(1000)
+    await starting
+    const instance = minted(router)
+    expect([...router.store]).toEqual([[PROCESS_KEY, HELD], [CHILD_KEY, { instance }]])
   })
 
 test('the header line alone makes no instance reusable in a process the store keeps no instance for', CONFIGURED,
@@ -286,26 +302,26 @@ test('the header line alone makes no instance reusable in a process the store ke
     const instance = minted(router)
     expect(instance).toMatch(V4)
     expect(nth(router.requests, 0)).toMatchObject({ event: 'session_start', instance_id: instance })
-    expect(router.store.get('identities')).toEqual([[PROCESS, { instance }]])
+    expect([...router.store]).toEqual([[PROCESS_KEY, { instance }]])
     expect(JSON.stringify(router.requests)).not.toContain('i-1')
     keptInStore(router, PROCESS)
   })
 
 test('the store keeps the newest eight instances, so a ninth process drops the oldest', CONFIGURED, async ($, on) => {
-  const older = Array.from({ length: 8 }, (_, at) => [String(1000001 + at), { instance: `other-${at}` }])
-  const { clock, router } = processHost(on, INHERITED, { process: CHILD, store: { identities: older } })
+  const older = Array.from({ length: 8 }, (_, at) => [`identity:${1000001 + at}`, { instance: `other-${at}` }] as const)
+  const { clock, router } = processHost(on, INHERITED, { process: CHILD, store: Object.fromEntries(older) })
   await start($, clock)
   const instance = minted(router)
-  expect(router.store.get('identities')).toEqual([...older.slice(1), [CHILD, { instance }]])
+  expect([...router.store]).toEqual([...older.slice(1), [CHILD_KEY, { instance }]])
 })
 
 test('a host that runs no command mints as a child process does and leaves the store alone', CONFIGURED,
   async ($, on) => {
-    const { clock, router } = processHost(on, INHERITED, { store: { identities: [[PROCESS, HELD]] } })
+    const { clock, router } = processHost(on, INHERITED, { store: { [PROCESS_KEY]: HELD } })
     await start($, clock)
     const instance = minted(router)
     expect(instance).toMatch(V4)
-    expect(router.store.get('identities')).toEqual([[PROCESS, HELD]])
+    expect([...router.store]).toEqual([[PROCESS_KEY, HELD]])
     expect(router.logs).toEqual([])
   })
 

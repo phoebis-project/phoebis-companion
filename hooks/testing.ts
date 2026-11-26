@@ -115,7 +115,10 @@ export type FakeRouter = {
   state?: Identity
   /** The other values the mod wrote through `$.state.set`, by key, each the last write. */
   values: Map<string, unknown>
-  /** The plugin's store as the mod left it, by key: the start's contents and every `$.store.set` over them. */
+  /**
+   * The plugin's store as the mod left it, by key: the start's contents with every `$.store.set` and `$.store.delete`
+   * over them.
+   */
   store: Map<string, unknown>
   /** The argument vector of every `$.process.run`, in order. */
   commands: (readonly string[])[]
@@ -179,6 +182,11 @@ export type FakeRouter = {
   delayGit: (ms: number) => void
   /** Holds the next `$.session.id()` for this long on the clock before it answers. */
   delayId: (ms: number) => void
+  /**
+   * Holds the next `$.state.set` of the plugin's identity for this long on the clock before the write lands, as a host
+   * whose hook on the write runs for a while does.
+   */
+  delayIdentityWrite: (ms: number) => void
   /** Holds the next `$.agent.list()` for this long on the clock before it answers. */
   delayList: (ms: number) => void
   /** Holds the next `$.state.get` of the plugin's tracked work for this long on the clock before it answers. */
@@ -188,7 +196,7 @@ export type FakeRouter = {
    * ahead of the hold and uses none of it.
    */
   delayRegister: (ms: number) => void
-  /** Holds the fence's next read of the stored pairs (`$.store.get`) for this long on the clock before it answers. */
+  /** Holds the fence's next read of its key (`$.store.get`) for this long on the clock before it answers. */
   delayStore: (ms: number) => void
   /** Holds the next `$.state.set` of that value for this long on the clock before the write lands. */
   delayWrite: (key: 'facts' | 'model', ms: number) => void
@@ -370,6 +378,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   let envSetDelayMs = 0
   let gitDelayMs = 0
   let idDelayMs = 0
+  let identityWriteDelayMs = 0
   let listDelayMs = 0
   let modelDelayMs = 0
   let registerDelayMs = 0
@@ -456,6 +465,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     delayId: (ms) => {
       idDelayMs = ms
+    },
+    delayIdentityWrite: (ms) => {
+      identityWriteDelayMs = ms
     },
     delayList: (ms) => {
       listDelayMs = ms
@@ -662,14 +674,22 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     }
     const denial = identityWriteDenials.shift()
     if (denial !== undefined) return { deny: denial }
-    identities.set(id, e.value as Identity)
-    stateVersion += 1
-    router.state = e.value as Identity
-    return { value: { isSet: true, version: stateVersion } }
+    // The host writes under the session the call was made in, whatever id it moves to while the write is held.
+    const under = id
+    const land = (): { value: { isSet: boolean; version: number } } => {
+      identities.set(under, e.value as Identity)
+      stateVersion += 1
+      router.state = e.value as Identity
+      return { value: { isSet: true, version: stateVersion } }
+    }
+    if (identityWriteDelayMs === 0) return land()
+    const ms = identityWriteDelayMs
+    identityWriteDelayMs = 0
+    return clock.sleep(ms).then(land)
   })
   on('store.get', async (_$, e) => {
     router.reached.push('store.get')
-    if (e.key === 'identities' && storeDelayMs > 0) {
+    if (e.key.startsWith('identity:') && storeDelayMs > 0) {
       const ms = storeDelayMs
       storeDelayMs = 0
       await clock.sleep(ms)
@@ -681,6 +701,16 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     // The host keeps JSON text, so a read gives back the value's JSON form.
     router.store.set(e.key, JSON.parse(JSON.stringify(e.value)))
     return { value: undefined }
+  })
+  on('store.delete', (_$, e) => {
+    router.reached.push('store.delete')
+    router.store.delete(e.key)
+    return { value: undefined }
+  })
+  // A map answers its keys as the host does: in insertion order, with a set of a key that exists keeping its place.
+  on('store.keys', () => {
+    router.reached.push('store.keys')
+    return { value: [...router.store.keys()] }
   })
   on('process.run', async (_$, e) => {
     router.reached.push('process.run')
