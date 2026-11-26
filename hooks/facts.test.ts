@@ -433,6 +433,26 @@ test('a write of the tracked work abandoned at five seconds that the host lands 
     expect(router.values.get('model')).toEqual(BUSY_MODEL)
   })
 
+test('a write of the tracked work abandoned ahead of the session\'s end that lands behind it does not stay',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    // Main's turn end writes main idle, and the host holds that write past the limit.
+    const landIdle = router.holdWrite('model')
+    await complete($, clock)
+    await clock.advance(5000)
+    // The prompt turns main busy, and the host takes that write in time. The prompt's report gets no answer, so the
+    // session ends with that request still out.
+    router.answer(() => new Promise<Reply>(() => undefined))
+    await prompt($, clock)
+    // The session ends with the host still in it, and the abandoned write lands behind the end. A resume of the same
+    // conversation would restore what the host then holds.
+    await end($, clock, 'other', 'session-a')
+    landIdle()
+    await clock.settle()
+    expect(router.values.get('model')).toEqual(BUSY_MODEL)
+  })
+
 test('a host whose writes of the tracked work each land behind the limit comes to rest', CONFIGURED,
   async ($, on) => {
     const { clock, router } = host(on)

@@ -721,11 +721,12 @@ function followWrite($: EngineInterface, write: Promise<boolean>, landed: () => 
  * Runs where a write of a saved value that the limit abandoned has landed. The host can now hold a text that is not
  * the present snapshot's, and one more pump writes the snapshot again. The landing acts for its own session alone,
  * since a link writes a record's values only while the host is in that record's session, so a pump started behind a
- * move of the host or of the module would write nothing of this record's.
+ * move of the host or of the module would write nothing of this record's. An ended session counts too, since a resume
+ * of the same conversation or a reload restores what the host holds.
  */
 async function landedLate($: EngineInterface, record: SessionRecord, stale: () => boolean): Promise<void> {
   const id = await guarded(() => $.session.id())
-  if (session !== record || record.stopped || id !== record.id) return
+  if (session !== record || id !== record.id) return
   if (stale()) void pump($)
 }
 
