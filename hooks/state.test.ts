@@ -1022,6 +1022,18 @@ test('a registration whose read of the client\'s agents fails releases no agent 
     expect(told(router)).toEqual(['session_start'])
   })
 
+test('a registration whose list read the host refuses still schedules its heartbeat', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  router.denyList('another hook refuses the read')
+  await start($, clock)
+  // The heartbeat's interval is twenty five seconds under the rig's lease.
+  await clock.advance(24_999)
+  expect(router.requests.map((body) => body.event)).toEqual(['session_start'])
+  await clock.advance(1)
+  expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'heartbeat'])
+  expect(router.times).toEqual([T0, T0 + 25_000])
+})
+
 test('a loop the client\'s list never names counts for main and is never announced', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on)
   await start($, clock)
