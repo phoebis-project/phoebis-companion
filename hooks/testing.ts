@@ -208,6 +208,11 @@ export type FakeRouter = {
    * it, which rejects the call.
    */
   denyIdentityWrite: (reason: string) => void
+  /**
+   * Denies the next `$.agent.list()` with the reason, as a host whose hook on the read refuses it, which rejects the
+   * call.
+   */
+  denyList: (reason: string) => void
   /** Denies the next `$.tool.register` with the reason, as an engine that refuses the spec does. */
   denyRegister: (reason: string) => void
   /** Denies the next `$.state.set` of that value with the reason, which rejects the call. */
@@ -356,6 +361,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const envSetDenials: string[] = []
   const idDenials: string[] = []
   const identityWriteDenials: string[] = []
+  const listDenials: string[] = []
   const registerDenials: string[] = []
   const writeDenials: Record<'facts' | 'model', string[]> = { facts: [], model: [] }
   const writeHolds: Record<'facts' | 'model', { land?: () => void }[]> = { facts: [], model: [] }
@@ -476,6 +482,9 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     },
     denyIdentityWrite: (reason) => {
       identityWriteDenials.push(reason)
+    },
+    denyList: (reason) => {
+      listDenials.push(reason)
     },
     denyRegister: (reason) => {
       registerDenials.push(reason)
@@ -735,6 +744,8 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   })
   on('agent.list', async () => {
     router.reached.push('agent.list')
+    const denial = listDenials.shift()
+    if (denial !== undefined) return { deny: denial }
     if (listDelayMs > 0) {
       const ms = listDelayMs
       listDelayMs = 0

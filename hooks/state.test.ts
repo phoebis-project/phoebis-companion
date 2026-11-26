@@ -1006,6 +1006,22 @@ test('an agent the router holds and the client runs after a reload joins its par
     ])
   })
 
+test('a registration whose read of the client\'s agents fails releases no agent that only the router holds',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    router.answer((_body, ack) => ok({
+      ...ack,
+      agents: [
+        { agent_id: 'main', state: 'busy', request_generation: 1 },
+        { agent_id: 'agent-9', state: 'busy', request_generation: 3 },
+      ],
+    }))
+    // Without the list nothing shows whether agent-9 still runs.
+    router.denyList('another hook refuses the read')
+    await start($, clock)
+    expect(told(router)).toEqual(['session_start'])
+  })
+
 test('a loop the client\'s list never names counts for main and is never announced', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on)
   await start($, clock)
