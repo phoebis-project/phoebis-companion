@@ -8,7 +8,16 @@ import type {
   Timer,
   ToolCallInput,
 } from 'claude-code'
-import type { AgentFactSet, Identity, SavedAgent, SavedModel, SavedTask, SessionFactSet } from '../types'
+import type {
+  AgentFactSet,
+  Identity,
+  SavedAgent,
+  SavedAgentFacts,
+  SavedFacts,
+  SavedModel,
+  SavedTask,
+  SessionFactSet,
+} from '../types'
 import { agentFactSet, sameFacts, sessionFactSet } from './fact-rules'
 import type { SessionRead } from './fact-rules'
 import {
@@ -43,6 +52,7 @@ const EVENTS_PATH = '/v0/keepalive/events'
 // The loader lists what a $.state call names only from a reference no importer can change.
 const IDENTITY_REF = { plugin: 'phoebis-companion', key: 'identity' } as const
 const MODEL_REF = { plugin: 'phoebis-companion', key: 'model' } as const
+const FACTS_REF = { plugin: 'phoebis-companion', key: 'facts' } as const
 // The plugin's store outlives the session the host's state belongs to, so it keeps each client process's pair for a
 // reload under a later session id of that process. An ended process's entry is never read again, so the store keeps
 // the newest alone.
@@ -154,6 +164,9 @@ let factOptions: FactOptions = { agents: false, project: false, title: false }
 let cacheWarming = true
 // The tracked work as the host last took it, so a pump writes it only when it changed.
 let savedModel: string | undefined
+// The saved sets as the host last took them. A text of its own, so a write of one value that fails or is abandoned
+// leaves the other value's text as it is.
+let savedSets: string | undefined
 let modelWrites: Promise<unknown> = Promise.resolve()
 // The link that waits to start. Each pump that asks meanwhile joins it.
 let nextWrite: Promise<void> | undefined
@@ -682,7 +695,6 @@ function snapshotModel(record: SessionRecord): SavedModel {
     state: agent.state,
     open: [...agent.open.values()].map((task) => ({ ...task })),
     lastPresence: agent.lastPresence,
-    ...savedFacts(agent),
   }))
   return {
     id: record.id,
@@ -690,8 +702,16 @@ function snapshotModel(record: SessionRecord): SavedModel {
     crons: [...model.crons.values()].map((cron) => ({ ...cron })),
     released: [...model.released],
     routerReleased: [...record.routerReleased],
-    ...savedFacts(model),
   }
+}
+
+function snapshotFacts(record: SessionRecord): SavedFacts {
+  const agents: SavedAgentFacts[] = []
+  for (const agent of model.agents.values()) {
+    const saved = savedFacts(agent)
+    if (saved.facts !== undefined || saved.factsOwed === true) agents.push({ id: agent.id, ...saved })
+  }
+  return { id: record.id, agents, ...savedFacts(model) }
 }
 
 function savedFacts<T>(slot: FactsSlot<T>): { facts?: T; factsOwed?: true } {
@@ -724,17 +744,27 @@ function restoreModel(saved: SavedModel, sessionRecord: SessionRecord): void {
     const record = freshRecord(agent.id, agent.state, agent.parent)
     record.open = new Map(agent.open.map((task) => [task.id, { ...task }]))
     record.lastPresence = agent.lastPresence
-    if (factOptions.agents) {
-      restoreFacts(record, agent)
-      // No spawn fires again at a reload, so the saved set stands until the list's next read.
-      if (agent.facts !== undefined) record.facts = agent.facts
-    }
     return [agent.id, record]
   }))
   model.crons = new Map(saved.crons.map((cron) => [cron.id, { ...cron }]))
   model.released = new Set(saved.released)
   sessionRecord.routerReleased = new Set(saved.routerReleased)
-  // The saved work does not say which members owed the mark, so the mark comes back while either kind is on. The
+  mainAgent()
+}
+
+// The saved sets back in their slots, under the options. An entry of an agent the restored work does not hold is
+// left out, so the slots and the records stay in step.
+function restoreSavedFacts(saved: SavedFacts): void {
+  if (factOptions.agents) {
+    for (const entry of saved.agents) {
+      const record = model.agents.get(entry.id)
+      if (record === undefined) continue
+      restoreFacts(record, entry)
+      // No spawn fires again at a reload, so the saved set stands until the list's next read.
+      if (entry.facts !== undefined) record.facts = entry.facts
+    }
+  }
+  // The saved set does not say which members owed the mark, so the mark comes back while either kind is on. The
   // one report that it costs carries the present set.
   if (factOptions.project || factOptions.title) {
     restoreFacts(model, {
@@ -747,7 +777,6 @@ function restoreModel(saved: SavedModel, sessionRecord: SessionRecord): void {
   if (factOptions.title && saved.facts?.title !== undefined && seenTitle?.id !== saved.id) {
     seenTitle = { id: saved.id, title: saved.facts.title }
   }
-  mainAgent()
 }
 
 function heldModelFor(held: unknown, id: string): SavedModel | undefined {
@@ -756,6 +785,11 @@ function heldModelFor(held: unknown, id: string): SavedModel | undefined {
     return undefined
   }
   return held as SavedModel
+}
+
+function heldFactsFor(held: unknown, id: string): SavedFacts | undefined {
+  if (field(held, 'id') !== id || !Array.isArray(field(held, 'agents'))) return undefined
+  return held as SavedFacts
 }
 
 /**
@@ -794,12 +828,25 @@ async function landedLate($: EngineInterface, record: SessionRecord, stale: () =
 async function writeLink($: EngineInterface): Promise<void> {
   const record = session
   if (record === undefined) return
-  const value = snapshotModel(record)
-  const text = JSON.stringify(value)
-  if (text === savedModel) return
-  await followWrite($, $.state.set(MODEL_REF, value), () => {
-    savedModel = text
-  }, () => void landedLate($, record, () => JSON.stringify(snapshotModel(record)) !== text))
+  // Both snapshots are taken in one step, so the two values describe one moment.
+  const work = snapshotModel(record)
+  const sets = snapshotFacts(record)
+  const workText = JSON.stringify(work)
+  const setsText = JSON.stringify(sets)
+  const writes: Promise<void>[] = []
+  if (workText !== savedModel) {
+    writes.push(followWrite($, $.state.set(MODEL_REF, work), () => {
+      savedModel = workText
+    }, () => void landedLate($, record, () => JSON.stringify(snapshotModel(record)) !== workText)))
+  }
+  if (setsText !== savedSets) {
+    writes.push(followWrite($, $.state.set(FACTS_REF, sets), () => {
+      savedSets = setsText
+    }, () => void landedLate($, record, () => JSON.stringify(snapshotFacts(record)) !== setsText)))
+  }
+  // Both writes are out together, so the link ends within one write limit, and a refused write of one value
+  // leaves the other its time.
+  await Promise.all(writes)
 }
 
 // The host completes its calls in no stated order, so one link of the chain runs at a time, and the next one takes its
@@ -846,7 +893,9 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
   // The same id in the same process is a reload of the module or a resume after its end, and the host still holds
   // its tracked work. A new id is a new conversation, so nothing the old one had open or scheduled carries over. Read
   // before the session moves, so a pump during the read never writes the old session's work under the new id.
-  const held = heldModelFor((await $.state.get(MODEL_REF)).value, id)
+  const [work, sets] = await Promise.all([$.state.get(MODEL_REF), $.state.get(FACTS_REF)])
+  const held = heldModelFor(work.value, id)
+  const heldFacts = heldFactsFor(sets.value, id)
   // The host can leave the session while the read above is out and begin no transition, since a clear or a resume
   // raises no start. The session this caller read is then one the host left, so it installs nothing.
   if (await $.session.id() !== id) return true
@@ -869,8 +918,10 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
   queue.reports = collapse([], startReport())
   queue.deferred = new Map()
   savedModel = undefined
+  savedSets = undefined
   Object.assign(model, freshModel())
   if (held !== undefined) restoreModel(held, session)
+  if (heldFacts !== undefined) restoreSavedFacts(heldFacts)
   keepIdentity($, isCurrent)
   return false
 }

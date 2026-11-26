@@ -133,8 +133,8 @@ test('a reload in the same process keeps the owner line and the instance and con
     const first = nth(router.requests, 0)
     expect(first).toMatchObject({ event: 'session_start', owner_id: 'u-old', instance_id: 'i-1' })
     expect(first.sequence).toBeGreaterThanOrEqual(RELOAD_AT)
-    // The tracked work is written as it changes, and the pair is never minted again.
-    expect([...router.values.keys()]).toEqual(['model'])
+    // The tracked work and the saved sets are written as they change, and the pair is never minted again.
+    expect([...router.values.keys()]).toEqual(['model', 'facts'])
     expect(router.state).toBeUndefined()
     expect(router.refusals).toEqual([])
     expect(router.requests.map((body) => body.event)).toEqual(['session_start', 'activity'])

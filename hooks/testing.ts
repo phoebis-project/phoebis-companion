@@ -183,19 +183,16 @@ export type FakeRouter = {
   /** Holds the next `$.state.get` of the plugin's tracked work for this long on the clock before it answers. */
   delayModel: (ms: number) => void
   /**
-   * Holds the next `$.state.set` of the plugin's tracked work for this long on the clock before the write lands, as a
-   * host that completes its calls in no stated order can land it behind a later one.
-   */
-  delayModelWrite: (ms: number) => void
-  /** Holds each `$.state.set` of the plugin's tracked work from here on for this long on the clock before it lands. */
-  delayModelWrites: (ms: number) => void
-  /**
    * Holds the next `$.tool.register` for this long on the clock before it answers. A denial of `denyRegister` is taken
    * ahead of the hold and uses none of it.
    */
   delayRegister: (ms: number) => void
   /** Holds the fence's next read of the stored pairs (`$.store.get`) for this long on the clock before it answers. */
   delayStore: (ms: number) => void
+  /** Holds the next `$.state.set` of that value for this long on the clock before the write lands. */
+  delayWrite: (key: 'facts' | 'model', ms: number) => void
+  /** Holds each `$.state.set` of that value from here on for this long on the clock before it lands. */
+  delayWrites: (key: 'facts' | 'model', ms: number) => void
   /**
    * Denies the next `$.env.set` of the owner header (`ANTHROPIC_CUSTOM_HEADERS`) with the reason, as another plugin's
    * hook on the variable does, which rejects the call.
@@ -211,24 +208,17 @@ export type FakeRouter = {
    * it, which rejects the call.
    */
   denyIdentityWrite: (reason: string) => void
-  /**
-   * Denies the next `$.state.set` of the plugin's tracked work with the reason, as a host whose hook on the write
-   * refuses it, which rejects the call.
-   */
-  denyModelWrite: (reason: string) => void
-  /**
-   * Denies each `$.state.set` of the plugin's tracked work from here on with the reason, as a host that refuses the
-   * plugin's state does.
-   */
-  denyModelWrites: (reason: string) => void
   /** Denies the next `$.tool.register` with the reason, as an engine that refuses the spec does. */
   denyRegister: (reason: string) => void
+  /** Denies the next `$.state.set` of that value with the reason, which rejects the call. */
+  denyWrite: (key: 'facts' | 'model', reason: string) => void
+  /** Denies each `$.state.set` of that value from here on with the reason. */
+  denyWrites: (key: 'facts' | 'model', reason: string) => void
   /**
-   * Holds the next `$.state.set` of the plugin's tracked work and answers the function that lands it, so a case lands
-   * two held writes in the order it picks, as a host that completes its calls in no stated order can. The function
-   * throws where the write it holds never started.
+   * Holds the next `$.state.set` of that value and answers the function that lands it. The function throws where the
+   * write it holds never started.
    */
-  holdModelWrite: () => () => void
+  holdWrite: (key: 'facts' | 'model') => () => void
 }
 
 type Replayed = { tool?: unknown; spawn?: { model?: string; agentId?: string } }
@@ -366,19 +356,19 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   const envSetDenials: string[] = []
   const idDenials: string[] = []
   const identityWriteDenials: string[] = []
-  const modelWriteDenials: string[] = []
-  const modelWriteHolds: { land?: () => void }[] = []
-  let modelWritesDenial: string | undefined
   const registerDenials: string[] = []
+  const writeDenials: Record<'facts' | 'model', string[]> = { facts: [], model: [] }
+  const writeHolds: Record<'facts' | 'model', { land?: () => void }[]> = { facts: [], model: [] }
+  const writesDenial: Partial<Record<'facts' | 'model', string>> = {}
   let envSetDelayMs = 0
   let gitDelayMs = 0
   let idDelayMs = 0
   let listDelayMs = 0
   let modelDelayMs = 0
-  let modelWriteDelayMs = 0
-  let modelWritesDelayMs = 0
   let registerDelayMs = 0
   let storeDelayMs = 0
+  const writeDelayMs: Record<'facts' | 'model', number> = { facts: 0, model: 0 }
+  const writesDelayMs: Record<'facts' | 'model', number> = { facts: 0, model: 0 }
   // The agents the router holds per session, each with its generation.
   const held = new Map<string, Map<string, number>>()
   // The last sequence the router took per session and instance, so a report at or below it is refused as the router
@@ -466,17 +456,17 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     delayModel: (ms) => {
       modelDelayMs = ms
     },
-    delayModelWrite: (ms) => {
-      modelWriteDelayMs = ms
-    },
-    delayModelWrites: (ms) => {
-      modelWritesDelayMs = ms
-    },
     delayRegister: (ms) => {
       registerDelayMs = ms
     },
     delayStore: (ms) => {
       storeDelayMs = ms
+    },
+    delayWrite: (key, ms) => {
+      writeDelayMs[key] = ms
+    },
+    delayWrites: (key, ms) => {
+      writesDelayMs[key] = ms
     },
     denyEnvSet: (reason) => {
       envSetDenials.push(reason)
@@ -487,18 +477,18 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     denyIdentityWrite: (reason) => {
       identityWriteDenials.push(reason)
     },
-    denyModelWrite: (reason) => {
-      modelWriteDenials.push(reason)
-    },
-    denyModelWrites: (reason) => {
-      modelWritesDenial = reason
-    },
     denyRegister: (reason) => {
       registerDenials.push(reason)
     },
-    holdModelWrite: () => {
+    denyWrite: (key, reason) => {
+      writeDenials[key].push(reason)
+    },
+    denyWrites: (key, reason) => {
+      writesDenial[key] = reason
+    },
+    holdWrite: (key) => {
       const hold: { land?: () => void } = {}
-      modelWriteHolds.push(hold)
+      writeHolds[key].push(hold)
       return () => {
         if (hold.land === undefined) throw new Error('the held write never started')
         hold.land()
@@ -641,22 +631,22 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   on('state.set', (_$, e) => {
     router.reached.push('state.set')
     if (e.key !== 'identity') {
-      const denial = e.key === 'model' ? modelWritesDenial ?? modelWriteDenials.shift() : undefined
+      const key = e.key
+      const denial = writesDenial[key] ?? writeDenials[key].shift()
       if (denial !== undefined) return { deny: denial }
       const write = (): { value: { isSet: boolean; version: number } } => {
         values.set(e.key, e.value)
         router.values.set(e.key, e.value)
         return { value: { isSet: true, version: 1 } }
       }
-      if (e.key !== 'model') return write()
-      const hold = modelWriteHolds.shift()
+      const hold = writeHolds[key].shift()
       if (hold !== undefined) {
         return new Promise<ReturnType<typeof write>>((resolve) => {
           hold.land = () => resolve(write())
         })
       }
-      const ms = modelWriteDelayMs > 0 ? modelWriteDelayMs : modelWritesDelayMs
-      modelWriteDelayMs = 0
+      const ms = writeDelayMs[key] > 0 ? writeDelayMs[key] : writesDelayMs[key]
+      writeDelayMs[key] = 0
       if (ms === 0) return write()
       return clock.sleep(ms).then(write)
     }

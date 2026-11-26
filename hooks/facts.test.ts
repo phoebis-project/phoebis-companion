@@ -39,43 +39,13 @@ const T0 = 1_790_000_000_000
 
 // What a load that reported the title left in the host's state, and the pair it minted, as a reload finds them.
 const IDENTITY = { instance: 'i-1', owner: 'u-1' }
-const TITLED_MODEL = {
-  id: 'session-a',
-  agents: [{ id: 'main', state: 'busy', open: [], lastPresence: 0 }],
-  crons: [],
-  released: [],
-  routerReleased: [],
-  facts: { title: 'Checkout retry' },
-}
+const TITLED_SAVED = { id: 'session-a', agents: [], facts: { title: 'Checkout retry' } }
 // What a load left whose clear of the title the router had not acknowledged.
-const OWED_MODEL = {
-  id: 'session-a',
-  agents: [{ id: 'main', state: 'busy', open: [], lastPresence: 0 }],
-  crons: [],
-  released: [],
-  routerReleased: [],
-  facts: {},
-  factsOwed: true,
-}
+const OWED_SAVED = { id: 'session-a', agents: [], facts: {}, factsOwed: true }
 // What a load left that reported a subagent's name, and one whose clear of the agent's set the router had not
 // acknowledged.
-const AGENT_MODEL = {
-  id: 'session-a',
-  agents: [
-    { id: 'main', state: 'busy', open: [{ id: 'worker-1', kind: 'subagent' }], lastPresence: 0 },
-    { id: 'worker-1', parent: 'main', state: 'busy', open: [], lastPresence: 0, facts: { name: 'reviewer' } },
-  ],
-  crons: [],
-  released: [],
-  routerReleased: [],
-}
-const AGENT_OWED_MODEL = {
-  ...AGENT_MODEL,
-  agents: [
-    { id: 'main', state: 'busy', open: [{ id: 'worker-1', kind: 'subagent' }], lastPresence: 0 },
-    { id: 'worker-1', parent: 'main', state: 'busy', open: [], lastPresence: 0, facts: {}, factsOwed: true },
-  ],
-}
+const AGENT_SAVED = { id: 'session-a', agents: [{ id: 'worker-1', facts: { name: 'reviewer' } }] }
+const AGENT_OWED_SAVED = { id: 'session-a', agents: [{ id: 'worker-1', facts: {}, factsOwed: true }] }
 // The agents a router answers the reload's registration with, as it still holds the subagent the earlier load ran.
 const WORKER_HELD = [
   { agent_id: 'main', state: 'busy', request_generation: 1 },
@@ -89,7 +59,7 @@ const BUSY_MODEL = {
   routerReleased: [],
 }
 // What a load that reported the project left.
-const PLACED_MODEL = { ...BUSY_MODEL, facts: { project: '/home/dev/notes' } }
+const PLACED_SAVED = { id: 'session-a', agents: [], facts: { project: '/home/dev/notes' } }
 // What a load with Agent reports off left while a subagent ran: the agent's entry holds no set.
 const WORKER_MODEL = {
   id: 'session-a',
@@ -175,9 +145,9 @@ function agentFacts(router: FakeRouter): Record<string, unknown>[] {
       ...members }) => members)
 }
 
-// The entry the saved model holds for one agent.
+// The entry the saved facts hold for one agent.
 function savedAgent(router: FakeRouter, id: string): unknown {
-  return (router.values.get('model') as { agents: { id: string }[] }).agents.find((agent) => agent.id === id)
+  return (router.values.get('facts') as { agents: { id: string }[] }).agents.find((agent) => agent.id === id)
 }
 
 // How many `$.state.set` calls reached the host.
@@ -321,7 +291,7 @@ test('a title loses an unpaired surrogate and still leaves', TITLED, async ($, o
 })
 
 test('an option turned off sends no clear of the title at the reload\'s registration', CONFIGURED, async ($, on) => {
-  const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
+  const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: TITLED_SAVED } })
   await start($, clock)
   await prompt($, clock)
   expect(events(router)).toEqual(['session_start', 'activity'])
@@ -329,45 +299,30 @@ test('an option turned off sends no clear of the title at the reload\'s registra
 
 test('a clear the router did not acknowledge is saved as owed, without the title it withdraws', TITLED,
   async ($, on) => {
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: TITLED_SAVED } })
     router.answer((_body, ack) => ok(ack))
     router.answer(() => ({ status: 503 }))
     // The session's title event names no title, so the saved title leaves while its option is on.
     await titled($, clock, 'SessionStart', 'session-a')
     await start($, clock)
-    expect(router.values.get('model')).toEqual({
-      id: 'session-a',
-      agents: [{ id: 'main', state: 'busy', open: [], lastPresence: 0 }],
-      crons: [],
-      released: [],
-      routerReleased: [],
-      facts: {},
-      factsOwed: true,
-    })
+    expect(router.values.get('facts')).toEqual(OWED_SAVED)
     await clock.advance(1000)
     expect(facts(router)).toEqual([{}, {}])
-    expect(router.values.get('model')).toEqual({
-      id: 'session-a',
-      agents: [{ id: 'main', state: 'busy', open: [], lastPresence: 0 }],
-      crons: [],
-      released: [],
-      routerReleased: [],
-      facts: {},
-    })
+    expect(router.values.get('facts')).toEqual({ id: 'session-a', agents: [], facts: {} })
   })
 
-test('a write of the tracked work that the host lands last holds no withdrawn title', TITLED, async ($, on) => {
+test('a write of the saved facts that the host lands last holds no withdrawn title', TITLED, async ($, on) => {
   const { clock, router } = host(on)
-  await titled($, clock, 'SessionStart', 'session-a', 'Checkout retry')
   await start($, clock)
-  // Main's turn end writes the work with the title, and the host lands that write two seconds late, behind the
+  // The prompt's read writes the sets with the title, and the host lands that write two seconds late, behind the
   // writes of the withdrawal that follows.
-  router.delayModelWrite(2000)
-  await complete($, clock)
+  router.delayWrite('facts', 2000)
+  await titled($, clock, 'UserPromptSubmit', 'session-a', 'Checkout retry')
+  await prompt($, clock)
   await titled($, clock, 'UserPromptSubmit', 'session-a')
   await prompt($, clock)
   await clock.advance(2000)
-  expect((router.values.get('model') as { facts?: unknown }).facts).toEqual({})
+  expect((router.values.get('facts') as { facts?: unknown }).facts).toEqual({})
 })
 
 test('a write of the tracked work the host refuses is written again by the next pump, which sends what waits',
@@ -376,7 +331,7 @@ test('a write of the tracked work the host refuses is written again by the next 
     await start($, clock)
     // Main's turn end changes the work, and the host refuses its write. The pump that issued it sends the state all the
     // same.
-    router.denyModelWrite('the host refuses the write')
+    router.denyWrite('model', 'the host refuses the write')
     await complete($, clock)
     expect(events(router)).toEqual(['session_start', 'state'])
     // The pump behind the state's answer found the work unwritten and wrote it again.
@@ -391,10 +346,25 @@ test('a write of the tracked work the host refuses is written again by the next 
     })
   })
 
+test('a write of the saved facts the host refuses is written again by the next pump', TITLED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  await titled($, clock, 'UserPromptSubmit', 'session-a', 'Checkout retry')
+  // Main's turn end changes the work and its read changes the sets in one step. The host takes the work and
+  // refuses the sets, and the router leaves the set unconfirmed, so nothing changes either value again.
+  router.denyWrite('facts', 'the host refuses the write')
+  router.answer((_body, ack) => ok(ack))
+  router.answer(() => ({ status: 503 }))
+  await complete($, clock)
+  expect(router.values.get('facts')).toEqual({
+    id: 'session-a', agents: [], facts: { title: 'Checkout retry' }, factsOwed: true,
+  })
+})
+
 test('a host that refuses each write of the tracked work still gets the registration and the due heartbeat',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
-    router.denyModelWrites('the host refuses the write')
+    router.denyWrites('model', 'the host refuses the write')
     await start($, clock)
     await clock.advance(25_000)
     expect(events(router)).toEqual(['session_start', 'heartbeat'])
@@ -408,7 +378,7 @@ test('a write of the tracked work that never settles holds the due heartbeat for
     await start($, clock)
     await clock.advance(24_000)
     // Main's turn end changes the work a second ahead of the heartbeat, and the host never answers its write.
-    router.delayModelWrite(600_000)
+    router.delayWrite('model', 600_000)
     await complete($, clock)
     await clock.advance(4_999)
     expect(events(router)).toEqual(['session_start'])
@@ -417,16 +387,28 @@ test('a write of the tracked work that never settles holds the due heartbeat for
     expect(router.times).toEqual([T0, T0 + 29_000, T0 + 29_000])
   })
 
+test('two writes that never settle hold the registration five seconds and not ten', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  router.delayWrite('facts', 600_000)
+  router.delayWrite('model', 600_000)
+  await start($, clock)
+  await clock.advance(4_999)
+  expect(events(router)).toEqual([])
+  await clock.advance(1)
+  expect(events(router)).toEqual(['session_start'])
+  expect(router.times).toEqual([T0 + 5_000])
+})
+
 test('a write of the tracked work abandoned at five seconds that the host lands behind a newer one does not stay',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
     await start($, clock)
     // Main's turn end writes main idle, and the host holds that write past the limit.
-    const landIdle = router.holdModelWrite()
+    const landIdle = router.holdWrite('model')
     await complete($, clock)
     await clock.advance(5000)
     // The prompt turns main busy again, and the host holds that write too.
-    const landBusy = router.holdModelWrite()
+    const landBusy = router.holdWrite('model')
     // The prompt's report gets no answer. A pump behind that answer would find the busy work unwritten and write it
     // again, and the case would pass without the step that follows a late landing.
     router.answer(() => new Promise<Reply>(() => undefined))
@@ -442,7 +424,7 @@ test('a host whose writes of the tracked work each land behind the limit comes t
   async ($, on) => {
     const { clock, router } = host(on)
     // Each write lands six seconds behind its call, a second behind the limit.
-    router.delayModelWrites(6000)
+    router.delayWrites('model', 6000)
     await start($, clock)
     await clock.advance(20_000)
     const writes = stateWrites(router)
@@ -455,7 +437,7 @@ test('pumps that ask while a write of the tracked work is held share one more wr
   async ($, on) => {
     const { clock, router } = host(on)
     // No write settles and the registration gets no answer, so nothing but a pump that asks starts a write.
-    router.delayModelWrites(600_000)
+    router.delayWrites('model', 600_000)
     router.answer(() => new Promise<Reply>(() => undefined))
     await start($, clock)
     for (let asked = 0; asked < 4; asked += 1) await step($, clock)
@@ -473,7 +455,7 @@ test('an abandoned write of the tracked work that lands after the host left its 
     await start($, clock)
     // Main's turn end writes main idle, the host holds that write seven seconds, and the prompt at five seconds turns
     // main busy again, so the late landing leaves the host with work since withdrawn.
-    router.delayModelWrite(7000)
+    router.delayWrite('model', 7000)
     await complete($, clock)
     await clock.advance(5000)
     await prompt($, clock)
@@ -485,13 +467,13 @@ test('an abandoned write of the tracked work that lands after the host left its 
   })
 
 test('a clear owed at a reload goes out at the registration', TITLED, async ($, on) => {
-  const { clock, router } = host(on, { state: IDENTITY, values: { model: OWED_MODEL } })
+  const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: OWED_SAVED } })
   await start($, clock)
   expect(facts(router)).toEqual([{}])
 })
 
 test('a title event ahead of the start outranks the saved title', TITLED, async ($, on) => {
-  const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
+  const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: TITLED_SAVED } })
   await titled($, clock, 'SessionStart', 'session-a')
   await start($, clock)
   expect(facts(router)).toEqual([{}])
@@ -499,7 +481,7 @@ test('a title event ahead of the start outranks the saved title', TITLED, async 
 
 test('a page that answers a clear with 200 leaves the clear to go out again under the facts backoff', TITLED,
   async ($, on) => {
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: TITLED_SAVED } })
     router.answer((_body, ack) => ok(ack))
     // Something in front of the router answers the clear with a page of its own.
     router.answer(() => ({ status: 200, body: '<!doctype html>' }))
@@ -510,13 +492,31 @@ test('a page that answers a clear with 200 leaves the clear to go out again unde
   })
 
 test('a clear the router refuses is not sent again at the next registration', TITLED, async ($, on) => {
-  const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
+  const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: TITLED_SAVED } })
   router.answer((_body, ack) => ok(ack))
   router.answer(() => ({ status: 400, body: { code: 'unknown_event' } }))
   await titled($, clock, 'SessionStart', 'session-a')
   await start($, clock)
   await start($, clock)
   expect(events(router)).toEqual(['session_start', 'session_facts', 'session_start'])
+})
+
+test('a saved facts value under another session\'s id restores nothing', TITLED, async ($, on) => {
+  const { clock, router } = host(on, {
+    state: IDENTITY,
+    values: { model: BUSY_MODEL, facts: { id: 'session-b', agents: [], facts: { title: 'Billing export' } } },
+  })
+  await start($, clock)
+  expect(events(router)).toEqual(['session_start'])
+})
+
+test('a saved facts value whose agents is no array restores nothing', TITLED, async ($, on) => {
+  const { clock, router } = host(on, {
+    state: IDENTITY,
+    values: { model: BUSY_MODEL, facts: { id: 'session-a', agents: null, facts: { title: 'Billing export' } } },
+  })
+  await start($, clock)
+  expect(events(router)).toEqual(['session_start'])
 })
 
 test('a default install sends no facts report and runs no git command', CONFIGURED, async ($, on) => {
@@ -562,14 +562,14 @@ describe('a registration names the kinds whose option is on', () => {
 
 test('an option turned off sends no clear of its saved members while another fact option stays on', TITLED,
   async ($, on) => {
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: PLACED_MODEL } })
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: PLACED_SAVED } })
     await start($, clock)
     expect(events(router)).toEqual(['session_start'])
   })
 
 test('a clear owed at a reload stays unsent while both fact options of the session are off', CONFIGURED,
   async ($, on) => {
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: OWED_MODEL } })
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: OWED_SAVED } })
     await start($, clock)
     expect(events(router)).toEqual(['session_start'])
   })
@@ -577,14 +577,14 @@ test('a clear owed at a reload stays unsent while both fact options of the sessi
 test('a saved project that left is cleared at the reload\'s registration while its option is on', PLACED,
   async ($, on) => {
     // The rig's default place answers no working directory, no root and no repository, so the read finds no project.
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: PLACED_MODEL } })
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: PLACED_SAVED } })
     await start($, clock)
     expect(facts(router)).toEqual([{}])
   })
 
 test('a saved title stays unsent at a reload while Session title reports is off and Project reports is on', PLACED,
   async ($, on) => {
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: BUSY_MODEL, facts: TITLED_SAVED } })
     await start($, clock)
     expect(events(router)).toEqual(['session_start'])
   })
@@ -925,7 +925,7 @@ test('an agent that ends and starts again while the registration reads the list 
 
 test('an option turned off sends no clear of an announced agent\'s facts at the reload\'s registration', CONFIGURED,
   async ($, on) => {
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_MODEL } })
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: WORKER_MODEL, facts: AGENT_SAVED } })
     // The list still runs the agent, so the tick reads its row.
     router.setAgents([{ id: 'worker-1', status: 'running' }])
     router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
@@ -937,7 +937,7 @@ test('an option turned off sends no clear of an announced agent\'s facts at the 
 
 test('an agent\'s saved facts stay unsent at its release while Agent reports is off', CONFIGURED,
   async ($, on) => {
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_MODEL } })
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: WORKER_MODEL, facts: AGENT_SAVED } })
     // The registration's answer omits the agent, so the mod announces it again, and the run ends while that start is
     // out, where the release carries the run's set.
     router.answer((_body, ack) => ok(ack))
@@ -951,28 +951,24 @@ test('an agent\'s saved facts stay unsent at its release while Agent reports is 
     await clock.advance(2000)
     expect(agentFacts(router)).toEqual([])
     // The agent's start and then its release went out, so the absence above comes from the path that the case guards.
-    expect(events(router)).toEqual(['session_start', 'agent_start', 'state'])
+    expect(under(router, 'session-a')).toEqual(['session_start', 'agent_start', 'state worker-1 released'])
   })
 
 test('an agent\'s clear the router did not acknowledge is saved as owed', AGENTS, async ($, on) => {
-  const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_MODEL } })
+  const { clock, router } = host(on, { state: IDENTITY, values: { model: WORKER_MODEL, facts: AGENT_SAVED } })
   // The row names no name, and its empty type keeps the rig's default type out of the set.
   router.setAgents([{ id: 'worker-1', status: 'running', type: '' }])
   router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
   router.answer(() => ({ status: 503 }))
   await start($, clock)
-  expect(savedAgent(router, 'worker-1')).toEqual({
-    id: 'worker-1', parent: 'main', state: 'busy', open: [], lastPresence: 0, facts: {}, factsOwed: true,
-  })
+  expect(savedAgent(router, 'worker-1')).toEqual({ id: 'worker-1', facts: {}, factsOwed: true })
   await clock.advance(1000)
   expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }, { agent_id: 'worker-1' }])
-  expect(savedAgent(router, 'worker-1')).toEqual({
-    id: 'worker-1', parent: 'main', state: 'busy', open: [], lastPresence: 0, facts: {},
-  })
+  expect(savedAgent(router, 'worker-1')).toEqual({ id: 'worker-1', facts: {} })
 })
 
 test('an agent\'s clear owed at a reload goes out at the registration', AGENTS, async ($, on) => {
-  const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_OWED_MODEL } })
+  const { clock, router } = host(on, { state: IDENTITY, values: { model: WORKER_MODEL, facts: AGENT_OWED_SAVED } })
   router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
   await start($, clock)
   expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
