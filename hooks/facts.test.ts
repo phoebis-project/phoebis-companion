@@ -1,4 +1,4 @@
-import { expect, mock, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { fakeRouter } from './testing'
@@ -81,20 +81,6 @@ const WORKER_HELD = [
   { agent_id: 'main', state: 'busy', request_generation: 1 },
   { agent_id: 'worker-1', state: 'busy', request_generation: 1 },
 ]
-// What a load left that released a subagent whose set reached the router, and the router's answer that still holds
-// the released record with its facts.
-const RELEASED_MODEL = {
-  id: 'session-a',
-  agents: [{ id: 'main', state: 'busy', open: [], lastPresence: 0 }],
-  crons: [],
-  released: ['worker-1'],
-  routerReleased: [],
-  factsLeft: ['worker-1'],
-}
-const WORKER_RELEASED = [
-  { agent_id: 'main', state: 'busy', request_generation: 1 },
-  { agent_id: 'worker-1', state: 'released', request_generation: 2 },
-]
 const BUSY_MODEL = {
   id: 'session-a',
   agents: [{ id: 'main', state: 'busy', open: [], lastPresence: 0 }],
@@ -102,6 +88,8 @@ const BUSY_MODEL = {
   released: [],
   routerReleased: [],
 }
+// What a load that reported the project left.
+const PLACED_MODEL = { ...BUSY_MODEL, facts: { project: '/home/dev/notes' } }
 // What a load with Agent reports off left while a subagent ran: the agent's entry holds no set.
 const WORKER_MODEL = {
   id: 'session-a',
@@ -332,19 +320,20 @@ test('a title loses an unpaired surrogate and still leaves', TITLED, async ($, o
   expect(facts(router)).toEqual([{ title: 'fix cart' }])
 })
 
-test('an option turned off clears the title at the reload\'s registration', CONFIGURED, async ($, on) => {
+test('an option turned off sends no clear of the title at the reload\'s registration', CONFIGURED, async ($, on) => {
   const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
   await start($, clock)
   await prompt($, clock)
-  expect(events(router)).toEqual(['session_start', 'session_facts', 'activity'])
-  expect(facts(router)).toEqual([{}])
+  expect(events(router)).toEqual(['session_start', 'activity'])
 })
 
-test('a clear the router did not acknowledge is saved as owed, without the title it withdraws', CONFIGURED,
+test('a clear the router did not acknowledge is saved as owed, without the title it withdraws', TITLED,
   async ($, on) => {
     const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
     router.answer((_body, ack) => ok(ack))
     router.answer(() => ({ status: 503 }))
+    // The session's title event names no title, so the saved title leaves while its option is on.
+    await titled($, clock, 'SessionStart', 'session-a')
     await start($, clock)
     expect(router.values.get('model')).toEqual({
       id: 'session-a',
@@ -495,7 +484,7 @@ test('an abandoned write of the tracked work that lands after the host left its 
     expect(stateWrites(router)).toBe(writes)
   })
 
-test('a clear owed at a reload goes out at the registration', CONFIGURED, async ($, on) => {
+test('a clear owed at a reload goes out at the registration', TITLED, async ($, on) => {
   const { clock, router } = host(on, { state: IDENTITY, values: { model: OWED_MODEL } })
   await start($, clock)
   expect(facts(router)).toEqual([{}])
@@ -508,21 +497,23 @@ test('a title event ahead of the start outranks the saved title', TITLED, async 
   expect(facts(router)).toEqual([{}])
 })
 
-test('a page that answers a clear with 200 leaves the clear to go out again under the facts backoff', CONFIGURED,
+test('a page that answers a clear with 200 leaves the clear to go out again under the facts backoff', TITLED,
   async ($, on) => {
     const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
     router.answer((_body, ack) => ok(ack))
     // Something in front of the router answers the clear with a page of its own.
     router.answer(() => ({ status: 200, body: '<!doctype html>' }))
+    await titled($, clock, 'SessionStart', 'session-a')
     await start($, clock)
     await clock.advance(1000)
     expect(facts(router)).toEqual([{}, {}])
   })
 
-test('a clear the router refuses is not sent again at the next registration', CONFIGURED, async ($, on) => {
+test('a clear the router refuses is not sent again at the next registration', TITLED, async ($, on) => {
   const { clock, router } = host(on, { state: IDENTITY, values: { model: TITLED_MODEL } })
   router.answer((_body, ack) => ok(ack))
   router.answer(() => ({ status: 400, body: { code: 'unknown_event' } }))
+  await titled($, clock, 'SessionStart', 'session-a')
   await start($, clock)
   await start($, clock)
   expect(events(router)).toEqual(['session_start', 'session_facts', 'session_start'])
@@ -543,6 +534,53 @@ test('a default install sends no facts report and runs no git command', CONFIGUR
   expect(events(router)).not.toContain('agent_facts')
   expect(gitRuns(router)).toEqual([])
 })
+
+describe('a registration names the kinds whose option is on', () => {
+  const kinds = (router: FakeRouter): unknown[] =>
+    router.requests.map((body) => body.event === 'session_start' ? body.reported_facts : undefined)
+
+  test('agents and title where those two options are on',
+    { options: { management_url: ROUTER_URL, report_agents: true, report_title: true } }, async ($, on) => {
+      const { clock, router } = host(on)
+      await start($, clock)
+      expect(kinds(router)).toEqual([['agents', 'title']])
+    })
+
+  test('agents and project where those two options are on',
+    { options: { management_url: ROUTER_URL, report_agents: true, report_project: true } }, async ($, on) => {
+      const { clock, router } = host(on)
+      await start($, clock)
+      expect(kinds(router)).toEqual([['agents', 'project']])
+    })
+
+  test('none in a default install', CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    expect(kinds(router)).toEqual([[]])
+  })
+})
+
+test('an option turned off sends no clear of its saved members while another fact option stays on', TITLED,
+  async ($, on) => {
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: PLACED_MODEL } })
+    await start($, clock)
+    expect(events(router)).toEqual(['session_start'])
+  })
+
+test('a clear owed at a reload stays unsent while both fact options of the session are off', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: OWED_MODEL } })
+    await start($, clock)
+    expect(events(router)).toEqual(['session_start'])
+  })
+
+test('a saved project that left is cleared at the reload\'s registration while its option is on', PLACED,
+  async ($, on) => {
+    // The rig's default place answers no working directory, no root and no repository, so the read finds no project.
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: PLACED_MODEL } })
+    await start($, clock)
+    expect(facts(router)).toEqual([{}])
+  })
 
 test('a set that stays the same is sent once, and a changed branch sends it again', PLACED, async ($, on) => {
   const { clock, router } = host(on, { place: STOREFRONT })
@@ -878,20 +916,39 @@ test('an agent that ends and starts again while the registration reads the list 
     }])
   })
 
-test('an option turned off clears each announced agent\'s facts at the reload\'s registration', CONFIGURED,
+test('an option turned off sends no clear of an announced agent\'s facts at the reload\'s registration', CONFIGURED,
   async ($, on) => {
     const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_MODEL } })
     // The list still runs the agent, so the tick reads its row.
     router.setAgents([{ id: 'worker-1', status: 'running' }])
     router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
     await start($, clock)
-    expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
+    expect(agentFacts(router)).toEqual([])
     await clock.advance(25000)
-    expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
+    expect(agentFacts(router)).toEqual([])
   })
 
-test('an agent\'s clear the router did not acknowledge is saved as owed', CONFIGURED, async ($, on) => {
+test('an agent\'s saved facts stay unsent at its release while Agent reports is off', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_MODEL } })
+    // The registration's answer omits the agent, so the mod announces it again, and the run ends while that start is
+    // out, where the release carries the run's set.
+    router.answer((_body, ack) => ok(ack))
+    router.answer(async (_body, ack) => {
+      await clock.sleep(2000)
+      return ok(ack)
+    })
+    await start($, clock)
+    router.setAgents([])
+    await complete($, clock, 'worker-1')
+    await clock.advance(2000)
+    expect(agentFacts(router)).toEqual([])
+  })
+
+test('an agent\'s clear the router did not acknowledge is saved as owed', AGENTS, async ($, on) => {
   const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_MODEL } })
+  // The row names no name, and its empty type keeps the rig's default type out of the set.
+  router.setAgents([{ id: 'worker-1', status: 'running', type: '' }])
   router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
   router.answer(() => ({ status: 503 }))
   await start($, clock)
@@ -905,67 +962,12 @@ test('an agent\'s clear the router did not acknowledge is saved as owed', CONFIG
   })
 })
 
-test('an agent\'s clear owed at a reload goes out at the registration', CONFIGURED, async ($, on) => {
+test('an agent\'s clear owed at a reload goes out at the registration', AGENTS, async ($, on) => {
   const { clock, router } = host(on, { state: IDENTITY, values: { model: AGENT_OWED_MODEL } })
   router.answer((_body, ack) => ok({ ...ack, agents: WORKER_HELD }))
   await start($, clock)
   expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
 })
-
-test('a released agent whose set reached the router is saved as one whose facts the router can still hold', AGENTS,
-  async ($, on) => {
-    const { clock, router } = host(on)
-    await start($, clock)
-    router.answerSpawn(() => ({ agentId: 'worker-1' }))
-    await spawn($, clock, REVIEWER)
-    // A spawn with no members leaves the agent no set, so the router holds none for it.
-    router.answerSpawn(() => ({ agentId: 'worker-2' }))
-    await spawn($, clock, { description: '', subagentType: '' })
-    router.setAgents([])
-    await complete($, clock, 'worker-1')
-    await complete($, clock, 'worker-2')
-    expect((router.values.get('model') as { factsLeft?: unknown }).factsLeft).toEqual(['worker-1'])
-  })
-
-test('a released agent whose closing set left is saved as one whose facts the router can still hold', AGENTS,
-  async ($, on) => {
-    const { clock, router } = host(on)
-    router.answer((_body, ack) => ok(ack))
-    router.answer(async (_body, ack) => {
-      await clock.sleep(2000)
-      return ok(ack)
-    })
-    await start($, clock)
-    router.answerSpawn(() => ({ agentId: 'worker-1' }))
-    await spawn($, clock, REVIEWER)
-    router.setAgents([])
-    await complete($, clock, 'worker-1')
-    await clock.advance(2000)
-    // The set left ahead of the release, and a reload with the option off starts from this saved model, as the case
-    // below does.
-    expect(agentFacts(router)).toEqual([REVIEWER_FACTS])
-    expect((router.values.get('model') as { factsLeft?: unknown }).factsLeft).toEqual(['worker-1'])
-  })
-
-test('an option turned off clears the facts of a released agent that a step runs again', CONFIGURED,
-  async ($, on) => {
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: RELEASED_MODEL } })
-    router.answer((_body, ack) => ok({ ...ack, agents: WORKER_RELEASED }))
-    await start($, clock)
-    router.setAgents([{ id: 'worker-1', status: 'running' }])
-    await step($, clock, 'worker-1')
-    expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
-  })
-
-test('an option turned off clears the facts of a released agent that a spawn runs again', CONFIGURED,
-  async ($, on) => {
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: RELEASED_MODEL } })
-    router.answer((_body, ack) => ok({ ...ack, agents: WORKER_RELEASED }))
-    await start($, clock)
-    router.answerSpawn(() => ({ agentId: 'worker-1' }))
-    await spawn($, clock, { description: '', subagentType: 'Explore' })
-    expect(agentFacts(router)).toEqual([{ agent_id: 'worker-1' }])
-  })
 
 test('an agent type past its cap leaves without the type', AGENTS, async ($, on) => {
   const { clock, router } = host(on)

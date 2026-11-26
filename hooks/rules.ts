@@ -3,8 +3,11 @@ import type { AgentFactSet, Identity, SavedAgent, SavedCron, SavedTask, SessionF
 // The rules the lifecycle computes with. Nothing here holds state: the session, the queue and the tracked work
 // belong to keepalive.ts.
 
+/** A kind of reported fact, by the option that switches it. */
+export type FactKind = 'agents' | 'project' | 'title'
+
 export type Report =
-  | { event: 'session_start'; owner_id?: string; previous_instance_id?: string }
+  | { event: 'session_start'; reported_facts: FactKind[]; owner_id?: string; previous_instance_id?: string }
   | { event: 'heartbeat' }
   | { event: 'session_end' }
   | { event: 'agent_start'; agent_id: string }

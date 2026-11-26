@@ -295,7 +295,7 @@ const EVENT_FIELDS: Record<string, { required: string[]; optional: string[] }> =
   heartbeat: { required: [], optional: [] },
   session_end: { required: [], optional: [] },
   session_facts: { required: [], optional: ['branch', 'cwd', 'project', 'repository', 'repository_root', 'title'] },
-  session_start: { required: [], optional: ['owner_id', 'previous_instance_id'] },
+  session_start: { required: ['reported_facts'], optional: ['owner_id', 'previous_instance_id'] },
   state: { required: ['agent_id', 'state'], optional: ['deadline', 'park_kind', 'request_generation', 'wake_at'] },
 }
 
@@ -309,6 +309,13 @@ function invalid(body: Record<string, unknown>): string | undefined {
   const allowed = new Set([...COMMON_FIELDS, ...fields.required, ...fields.optional])
   if (Object.keys(body).some((key) => !allowed.has(key))) return 'invalid_event'
   if ([...COMMON_FIELDS, ...fields.required].some((key) => body[key] === undefined)) return 'invalid_event'
+  if (fields.required.some((key) => body[key] === null)) return 'invalid_event'
+  // The router reads a repeated word once, so only a word that names no kind is refused.
+  const kinds = body.reported_facts
+  if (kinds !== undefined && (!Array.isArray(kinds) ||
+    kinds.some((word) => typeof word !== 'string' || !['agents', 'project', 'title'].includes(word)))) {
+    return 'invalid_event'
+  }
   const ids = [body.session_id, body.instance_id, body.agent_id ?? 'main']
   if (ids.some((id) => typeof id !== 'string' || id === '')) return 'invalid_identity'
   if (!Number.isInteger(body.sequence) || (body.sequence as number) < 1) return 'invalid_identity'

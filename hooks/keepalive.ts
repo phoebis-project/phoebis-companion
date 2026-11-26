@@ -32,7 +32,7 @@ import {
   sameAgent,
   samePark,
 } from './rules'
-import type { AgentRecord, Body, Cron, Park, Report } from './rules'
+import type { AgentRecord, Body, Cron, FactKind, Park, Report } from './rules'
 import { bearer, errorText, parsed, redactSecrets, say } from './settings'
 import type { FactOptions, Settings } from './settings'
 
@@ -110,10 +110,6 @@ type Model = {
   factsQueued: SessionFactSet | undefined
   // A set queued that the router has not answered for good, so a registration sends it again, an empty one too.
   factsOwed: boolean
-  // The released subagents whose last set queued held a member or was owed, or whose release carries a closing set.
-  // The router keeps a released record's facts until the record leaves and restarts that record when the agent runs
-  // again, so the next run owes its set.
-  factsLeft: Set<string>
 }
 
 type FactsSlot<T> = { factsQueued: T | undefined; factsOwed: boolean }
@@ -249,7 +245,6 @@ function freshModel(): Model {
     released: new Set(),
     factsQueued: undefined,
     factsOwed: false,
-    factsLeft: new Set(),
   }
 }
 
@@ -336,9 +331,6 @@ function release(agentId: string): void {
   const facts = record?.facts
   const unsent = session !== undefined && !session.announced.has(agentId)
   const earlier = releaseQueued(agentId)
-  if (record !== undefined && (record.factsOwed || Object.keys(record.factsQueued ?? {}).length > 0)) {
-    model.factsLeft.add(agentId)
-  }
   const known = model.agents.delete(agentId)
   model.turning.delete(agentId)
   model.released.add(agentId)
@@ -352,8 +344,6 @@ function release(agentId: string): void {
   const ending = earlier ? undefined : queue.reports.find((queued) => isRelease(queued, agentId))
   if (unsent && ending !== undefined && facts !== undefined && Object.keys(facts).length > 0) {
     closingSets.set(ending, facts)
-    // The set leaves behind this call, ahead of the release, so the router can hold it once the record is released.
-    model.factsLeft.add(agentId)
   }
   // A released agent that resumes under its id is announced again, which restarts it on the router.
   session?.announced.delete(agentId)
@@ -362,19 +352,12 @@ function release(agentId: string): void {
   }
 }
 
-// The router restarts a released record with the facts it kept, so a fresh record of an agent whose facts it can
-// still hold owes its set, and the start's acknowledgment states it whole, without members where the option is off.
-function takeFactsLeft(agent: AgentRecord): void {
-  if (model.factsLeft.delete(agent.id)) agent.factsOwed = true
-}
-
 // A live agent the mod meets first in the client's list or the router's answer (one that ran before this load, or one
 // resumed after its release) joins its parent's open set, so the parent stays parked on it until it ends.
 function adopt(agentId: string, parentId: string | undefined, state: AgentRecord['state'], facts: AgentFactSet): void {
   const parent = parentId ?? MAIN
   const agent = freshRecord(agentId, state, parent)
   agent.facts = facts
-  takeFactsLeft(agent)
   model.released.delete(agentId)
   session?.routerReleased.delete(agentId)
   model.agents.set(agentId, agent)
@@ -514,7 +497,6 @@ function spawned(agentId: string, parentId: string): AgentRecord {
   let agent = model.agents.get(agentId)
   if (agent === undefined) {
     agent = freshRecord(agentId, 'busy', parentId)
-    takeFactsLeft(agent)
     model.agents.set(agentId, agent)
     announce(agentId)
   } else {
@@ -660,10 +642,18 @@ function agentList($: EngineInterface): Promise<AgentInfo[] | undefined> {
   return guarded(() => $.agent.list())
 }
 
+// The kinds whose option is on, in alphabetical order, so two registrations of one option set carry one body.
+function reportedKinds(): FactKind[] {
+  const kinds: FactKind[] = []
+  if (factOptions.agents) kinds.push('agents')
+  if (factOptions.project) kinds.push('project')
+  if (factOptions.title) kinds.push('title')
+  return kinds
+}
+
 function startReport(previousInstance?: string): Report {
-  return previousInstance === undefined
-    ? { event: 'session_start' }
-    : { event: 'session_start', previous_instance_id: previousInstance }
+  const start: Report = { event: 'session_start', reported_facts: reportedKinds() }
+  return previousInstance === undefined ? start : { ...start, previous_instance_id: previousInstance }
 }
 
 function reregister(): void {
@@ -698,7 +688,6 @@ function snapshotModel(record: SessionRecord): SavedModel {
     released: [...model.released],
     routerReleased: [...record.routerReleased],
     ...savedFacts(model),
-    ...(model.factsLeft.size === 0 ? {} : { factsLeft: [...model.factsLeft] }),
   }
 }
 
@@ -714,22 +703,42 @@ function restoreFacts<T>(slot: FactsSlot<T>, saved: { facts?: T; factsOwed?: tru
   slot.factsOwed = saved.factsOwed === true
 }
 
+const PROJECT_MEMBERS = ['branch', 'cwd', 'project', 'repository', 'repository_root'] as const
+
+// The members of a saved set whose kind is on. The registration's list states a kind that is off, so its members
+// do not come back.
+function keptFacts(saved: SessionFactSet): SessionFactSet {
+  const kept: SessionFactSet = {}
+  if (factOptions.title && saved.title !== undefined) kept.title = saved.title
+  if (factOptions.project) {
+    for (const member of PROJECT_MEMBERS) if (saved[member] !== undefined) kept[member] = saved[member]
+  }
+  return kept
+}
+
 function restoreModel(saved: SavedModel, sessionRecord: SessionRecord): void {
   model.agents = new Map(saved.agents.map((agent) => {
     const record = freshRecord(agent.id, agent.state, agent.parent)
     record.open = new Map(agent.open.map((task) => [task.id, { ...task }]))
     record.lastPresence = agent.lastPresence
-    restoreFacts(record, agent)
-    // No spawn fires again at a reload, so the saved set stands until the list's next read. With the option off the
-    // present set stays empty, so the registration's whole send states the clear.
-    if (factOptions.agents && agent.facts !== undefined) record.facts = agent.facts
+    if (factOptions.agents) {
+      restoreFacts(record, agent)
+      // No spawn fires again at a reload, so the saved set stands until the list's next read.
+      if (agent.facts !== undefined) record.facts = agent.facts
+    }
     return [agent.id, record]
   }))
   model.crons = new Map(saved.crons.map((cron) => [cron.id, { ...cron }]))
   model.released = new Set(saved.released)
-  model.factsLeft = new Set(saved.factsLeft ?? [])
   sessionRecord.routerReleased = new Set(saved.routerReleased)
-  restoreFacts(model, saved)
+  // The saved work does not say which members owed the mark, so the mark comes back while either kind is on. The
+  // one report that it costs carries the present set.
+  if (factOptions.project || factOptions.title) {
+    restoreFacts(model, {
+      ...(saved.facts === undefined ? {} : { facts: keptFacts(saved.facts) }),
+      ...(saved.factsOwed === true ? { factsOwed: true as const } : {}),
+    })
+  }
   // No title event fires again at a reload, so the saved title stands until the next one. An event that saw the
   // session in this activation is newer than the save, also where it carried no title.
   if (factOptions.title && saved.facts?.title !== undefined && seenTitle?.id !== saved.id) {
@@ -1043,10 +1052,11 @@ async function readSessionFacts($: EngineInterface): Promise<void> {
 // a start as it answers any report of an agent it does not hold. `whole` is the send behind an acknowledged start
 // or registration, where the router's record may be a new one.
 function sendAgentFacts(record: SessionRecord, id: string, whole: boolean): void {
+  // The registration's list states a kind that is off, so no report of that kind goes out.
+  if (!factOptions.agents) return
   const agent = model.agents.get(id)
   if (agent === undefined || id === MAIN || !record.announced.has(id)) return
-  const set = factOptions.agents ? agent.facts : {}
-  queueFacts(agent, set, whole, { event: 'agent_facts', agent_id: id, ...set })
+  queueFacts(agent, agent.facts, whole, { event: 'agent_facts', agent_id: id, ...agent.facts })
 }
 
 /** Queues the set where it goes out, and answers whether it did. */

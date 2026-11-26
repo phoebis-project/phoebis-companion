@@ -354,12 +354,12 @@ test('queued reports collapse into one heartbeat, the newest state per agent and
     { event: 'agent_facts', agent_id: 'scout', name: 'scout' },
     { event: 'agent_facts', agent_id: 'worker', description: 'Review the retry loop', name: 'second' },
     { event: 'session_facts', branch: 'main', title: 'second' },
-    { event: 'session_start' },
-    { event: 'session_start', previous_instance_id: 'instance-old' },
+    { event: 'session_start', reported_facts: [] },
+    { event: 'session_start', reported_facts: [], previous_instance_id: 'instance-old' },
   ]
   const queue = reports.reduce(collapse, [] as Report[])
   expect(queue).toEqual([
-    { event: 'session_start', previous_instance_id: 'instance-old' },
+    { event: 'session_start', reported_facts: [], previous_instance_id: 'instance-old' },
     { event: 'heartbeat' },
     { event: 'agent_start', agent_id: 'worker' },
     { event: 'state', agent_id: 'worker', state: 'busy' },
@@ -380,7 +380,7 @@ test('restore puts a report back at the head unless a queued one supersedes it, 
   const prompted: Report = { event: 'activity', agent_id: 'main', kind: 'prompt' }
   const present: Report = { event: 'activity', agent_id: 'main', kind: 'presence' }
   const beat: Report = { event: 'heartbeat' }
-  const registration: Report = { event: 'session_start' }
+  const registration: Report = { event: 'session_start', reported_facts: [] }
   expect(restore([beat, worker], busy)).toEqual([busy, beat, worker])
   expect(restore([registration, beat], busy)).toEqual([registration, busy, beat])
   expect(restore([parked], busy)).toEqual([parked])
