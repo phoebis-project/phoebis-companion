@@ -74,9 +74,9 @@ const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000]
 // A request with no answer by then counts as a failed send. Ten seconds leave five tries of a heartbeat inside one
 // lease of 90 seconds, and a shorter limit would send a report twice that was only slow.
 const REQUEST_LIMIT_MS = 10000
-// A write of a saved value that has not landed by then is abandoned. A pump waits for the write that runs and for
-// the one behind it, so a hung state call holds it ten seconds at most and, with a hung request behind it, a due
-// heartbeat twenty.
+// A write of a saved value that has not landed by then is abandoned. A link starts its writes together, two at most,
+// and a pump waits for the link that runs and for the one behind it, so a hung state call holds the pump ten seconds at
+// most and, with a hung request behind it, a due heartbeat twenty.
 const WRITE_LIMIT_MS = 5000
 
 type SessionRecord = {
@@ -125,8 +125,9 @@ type Model = {
   released: Set<string>
 }
 
-// The client's list as a registration read it, with the subagents the mod held when it asked. The answer arrives
-// later, and an agent can end and start again under its id meanwhile, so a row counts for the record that asked.
+// The client's list as a registration read it, with the subagents the mod held when it asked. The answer arrives later,
+// and an agent can end and start again under its id meanwhile, so a row counts only for a record the list was asked
+// for.
 type Listed = { rows: AgentInfo[]; asked: AgentRecord[] }
 
 const ENDED = new Set(['completed', 'failed', 'killed'])
@@ -779,7 +780,10 @@ function keepIdentity($: EngineInterface, isCurrent: () => boolean): void {
   }))
 }
 
-/** Answers whether a transition of another session overtook this caller's, so its session is one the host left. */
+/**
+ * Answers whether the session this caller read is one the host left: the host moved to another id while the held work
+ * was read, or a transition of another session overtook this caller's.
+ */
 async function ensureSession($: EngineInterface, isCurrent: () => boolean): Promise<boolean> {
   const id = await $.session.id()
   // The record moves only for a prompt or a start that is still current at each decision, since a start can lose its
@@ -896,7 +900,8 @@ async function pump($: EngineInterface): Promise<void> {
     } catch (error) {
       // The client refuses a plugin's fetch inside the process when its policy check failed, and a refused host
       // throws the same way, so the one sign of either is this line: the backoff below retries all the same. The
-      // message is the host's and may quote the request, so the key and any URL credentials leave it first.
+      // message is the mod's own where the request limit passed, and otherwise the host's, which may quote the request,
+      // so the key and any URL credentials leave it first.
       response = undefined
       try {
         const reason = redactSecrets(errorText(error), config.key)

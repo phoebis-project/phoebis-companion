@@ -151,8 +151,9 @@ export type FakeRouter = {
   /**
    * Scripts the next `$.process.run` whose vector starts with `git`, and several calls answer the next ones in turn.
    * A function that answers a promise holds the call open until it settles. Without a script git answers the branch
-   * of the place whose `cwd` the call names, or of the present place where the call names none, and exit code 1 with
-   * no output where that place holds no branch.
+   * of the place whose `cwd` the call names, or of the present place where the call names none. It answers exit code 1
+   * with no output where that place holds no branch, and where the call names a directory that no place given to the
+   * rig has as its `cwd`.
    */
   answerGit: (fn: () => GitAnswer | Promise<GitAnswer>) => void
   /**

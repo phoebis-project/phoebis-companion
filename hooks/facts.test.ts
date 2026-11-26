@@ -60,7 +60,7 @@ const BUSY_MODEL = {
 }
 // What a load that reported the project left.
 const PLACED_SAVED = { id: 'session-a', agents: [], facts: { project: '/home/dev/notes' } }
-// What a load with Agent reports off left while a subagent ran: the agent's entry holds no set.
+// The tracked work that a load left while a subagent ran.
 const WORKER_MODEL = {
   id: 'session-a',
   agents: [
@@ -385,8 +385,8 @@ test('a host that refuses each write of the tracked work still gets the registra
     expect(router.values.get('model')).toBeUndefined()
   })
 
-test('a write of the tracked work that never settles holds the due heartbeat for five seconds', CONFIGURED,
-  async ($, on) => {
+test('a write of the tracked work that never settles holds the due heartbeat until the write limit has passed',
+  CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
     await start($, clock)
     await clock.advance(24_000)
@@ -890,14 +890,14 @@ test('a clear leaves the new session no owed mark of the session before it', TIT
   router.answer(() => ({ status: 503 }))
   await titled($, clock, 'SessionStart', 'session-a', 'Checkout retry')
   await start($, clock)
-  // The router did not answer the title's set, so its owed mark stands when the session clears.
+  // The router answered the title's set with a 503, so the set failed and its owed mark stands when the session clears.
   expect(router.values.get('facts')).toMatchObject({ id: 'session-a', factsOwed: true })
   await end($, clock, 'clear', 'session-a')
   router.setId('session-b')
   await prompt($, clock)
-  // The backoff of the refused set outlasts the clear, so a set that the new session owed would wait for it.
-  await clock.advance(1000)
-  expect(under(router, 'session-b')).toEqual(['session_start', 'activity'])
+  // A set that the new session owed would wait out the backoff of the failed set, while the saved value shows its mark
+  // at once.
+  expect(router.values.get('facts')).toEqual({ id: 'session-b', agents: [] })
 })
 
 test('an agent\'s facts follow its start again where the router lost its record', AGENTS, async ($, on) => {

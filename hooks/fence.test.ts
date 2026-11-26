@@ -187,7 +187,7 @@ test('a start after a clear in the same process keeps the instance once the stor
     await prompt($, clock)
     // The fences of eight later processes push this one out of the store's list.
     router.store.set('identities', Array.from({ length: 8 }, (_, at) =>
-      [String(1000001 + at), { instance: `i-${at}` }]))
+      [String(1000001 + at), { instance: `other-${at}` }]))
     // The fence picks its instance from the host's state, the header line, the store and the process id, and a reload
     // reads each of them again to the same value, so a second start in the load decides as a reload does.
     await start($, clock)
@@ -292,7 +292,7 @@ test('the header line alone makes no instance reusable in a process the store ke
   })
 
 test('the store keeps the newest eight instances, so a ninth process drops the oldest', CONFIGURED, async ($, on) => {
-  const older = Array.from({ length: 8 }, (_, at) => [String(1000001 + at), { instance: `i-${at}` }])
+  const older = Array.from({ length: 8 }, (_, at) => [String(1000001 + at), { instance: `other-${at}` }])
   const { clock, router } = processHost(on, INHERITED, { process: CHILD, store: { identities: older } })
   await start($, clock)
   const instance = minted(router)

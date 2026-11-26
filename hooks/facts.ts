@@ -40,8 +40,8 @@ const session: FactsSlot<SessionFactSet> & { due: boolean } = {
 // The set of a run that ended before the router acknowledged its start, by the queued release that ends the run, so
 // that acknowledgment puts it right ahead of that release. A later run of the agent ends under a release of its own.
 const closingSets = new WeakMap<Report, AgentFactSet>()
-// The title the client last named for each session, by that session's id: a title counts only for its own
-// session. An entry without a title is an event that saw the session and carried none.
+// The title the client last named for each session, by that session's id: a title counts only for its own session. An
+// entry without a title is an event that saw the session and carried none.
 const seenTitles = new Map<string, string | undefined>()
 // Counts the session reads, so a read that finishes behind a later one changes nothing.
 let factReads = 0

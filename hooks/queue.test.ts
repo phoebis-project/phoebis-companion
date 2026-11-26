@@ -242,7 +242,7 @@ test('a facts request abandoned at ten seconds stays owed and goes out again tho
     router.answer(() => new Promise<Reply>(() => undefined))
     await start($, clock)
     await clock.advance(11_000)
-    // Had the late 200 settled the set, the pump that sent the retry would have saved the work without the mark.
+    // Had the late 200 settled the set, the pump that sent the retry would have saved the sets without the mark.
     expect([...router.values.values()]).toContainEqual(expect.objectContaining({ factsOwed: true }))
     expect(events(router)).toEqual(['session_start', 'session_facts', 'session_facts'])
     expect(router.times).toEqual([T0, T0, T0 + 11_000])
