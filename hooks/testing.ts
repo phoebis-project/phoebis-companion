@@ -167,8 +167,8 @@ export type FakeRouter = {
    */
   answerSubmit: (fn: () => PromptSubmitResult | Promise<PromptSubmitResult>) => void
   /**
-   * Holds the next `$.env.set` of the owner header (`ANTHROPIC_CUSTOM_HEADERS`) for this long on the clock before the
-   * write lands, as a host whose hook on the write runs for a while does.
+   * Holds the next `$.env.set` of the instance header (`ANTHROPIC_CUSTOM_HEADERS`) for this long on the clock before
+   * the write lands, as a host whose hook on the write runs for a while does.
    */
   delayEnvSet: (ms: number) => void
   /**
@@ -194,8 +194,8 @@ export type FakeRouter = {
   /** Holds each `$.state.set` of that value from here on for this long on the clock before it lands. */
   delayWrites: (key: 'facts' | 'model', ms: number) => void
   /**
-   * Denies the next `$.env.set` of the owner header (`ANTHROPIC_CUSTOM_HEADERS`) with the reason, as another plugin's
-   * hook on the variable does, which rejects the call.
+   * Denies the next `$.env.set` of the instance header (`ANTHROPIC_CUSTOM_HEADERS`) with the reason, as another
+   * plugin's hook on the variable does, which rejects the call.
    */
   denyEnvSet: (reason: string) => void
   /**
@@ -285,7 +285,7 @@ const EVENT_FIELDS: Record<string, { required: string[]; optional: string[] }> =
   heartbeat: { required: [], optional: [] },
   session_end: { required: [], optional: [] },
   session_facts: { required: [], optional: ['branch', 'cwd', 'project', 'repository', 'repository_root', 'title'] },
-  session_start: { required: ['cache_warming', 'reported_facts'], optional: ['owner_id', 'previous_instance_id'] },
+  session_start: { required: ['cache_warming', 'reported_facts'], optional: ['previous_instance_id'] },
   state: { required: ['agent_id', 'state'], optional: ['deadline', 'park_kind', 'request_generation', 'wake_at'] },
 }
 

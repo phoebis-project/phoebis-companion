@@ -14,13 +14,12 @@ claude plugin test .
 
 The validation passes with no warning (checked on Claude Code 2.1.328). Its listing of the hooks module is the statement
 of what the mod does: the events it hooks, the engine calls it makes, the variables it reads and writes (it writes
-`ANTHROPIC_CUSTOM_HEADERS` and `PHOEBIS_KEEPALIVE_INSTANCE` and no other), and the state values `types/index.d.ts`
-declares. The gating hooks sit where a hook could refuse what was asked, on `agent.spawn`, `classic.SessionStart`,
-`classic.Stop`, `classic.SubagentStop`, `classic.UserPromptSubmit`, `prompt.submit` and `tool.call`, the hooks on
-`classic.SessionStart` and `classic.UserPromptSubmit` only with Session title reports on. Each passes its event on
-unchanged, and its `.catch` passes the event on when the mod fails, so the mod refuses no prompt, tool call, spawn or
-stop. The settings hooks on `config.set` refuse a Management URL as [Configure](install.md#configure) states and nothing
-else.
+`ANTHROPIC_CUSTOM_HEADERS` and no other), and the state values `types/index.d.ts` declares. The gating hooks sit where a
+hook could refuse what was asked, on `agent.spawn`, `classic.SessionStart`, `classic.Stop`, `classic.SubagentStop`,
+`classic.UserPromptSubmit`, `prompt.submit` and `tool.call`, the hooks on `classic.SessionStart` and
+`classic.UserPromptSubmit` only with Session title reports on. Each passes its event on unchanged, and its `.catch`
+passes the event on when the mod fails, so the mod refuses no prompt, tool call, spawn or stop. The settings hooks on
+`config.set` refuse a Management URL as [Configure](install.md#configure) states and nothing else.
 
 `claude plugin test` runs the cases in `hooks/*.test.ts` (checked on Claude Code 2.1.299 and 2.1.328). They replay the
 event logs under `hooks/fixtures/`, recorded from sessions of Claude Code 2.1.287 and 2.1.328, and hand-built events

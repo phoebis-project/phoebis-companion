@@ -37,8 +37,8 @@ const STOREFRONT_FACTS = {
 const KEY = 'k-test'
 const T0 = 1_790_000_000_000
 
-// What a load that reported the title left in the host's state, and the pair it minted, as a reload finds them.
-const IDENTITY = { instance: 'i-1', owner: 'u-1' }
+// What a load that reported the title left in the host's state, and the instance it minted, as a reload finds them.
+const IDENTITY = { instance: 'i-1' }
 const TITLED_SAVED = { id: 'session-a', agents: [], facts: { title: 'Checkout retry' } }
 // What a load left whose clear of the title the router had not acknowledged.
 const OWED_SAVED = { id: 'session-a', agents: [], facts: {}, factsOwed: true }

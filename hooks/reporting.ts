@@ -38,6 +38,8 @@ import {
   commandDeadline,
   earliest,
   heartbeatInterval,
+  instanceHeaderLines,
+  instanceOf,
   isFacts,
   isParkKind,
   isRealPrompt,
@@ -45,8 +47,6 @@ import {
   isRun,
   nextFireAt,
   nextSequence,
-  ownerHeaderLines,
-  ownerOf,
   parkOf,
   restore,
   reusable,
@@ -65,8 +65,8 @@ const EVENTS_PATH = '/v0/keepalive/events'
 const IDENTITY_REF = { plugin: 'phoebis-companion', key: 'identity' } as const
 const MODEL_REF = { plugin: 'phoebis-companion', key: 'model' } as const
 const FACTS_REF = { plugin: 'phoebis-companion', key: 'facts' } as const
-// The plugin's store outlives the session the host's state belongs to, so it keeps each client process's pair for a
-// reload under a later session id of that process. An ended process's entry is never read again, so the store keeps
+// The plugin's store outlives the session the host's state belongs to, so it keeps each client process's instance for
+// a reload under a later session id of that process. An ended process's entry is never read again, so the store keeps
 // the newest alone.
 const IDENTITIES = 'identities'
 const KEPT_IDENTITIES = 8
@@ -82,7 +82,6 @@ const WRITE_LIMIT_MS = 5000
 type SessionRecord = {
   id: string
   instance: string
-  owner: string
   sequence: number
   generations: Map<string, number>
   announced: Set<string>
@@ -145,7 +144,7 @@ let identity: Identity | undefined
 let hostProcess: { id: string | undefined } | undefined
 // A call on `$` runs the host's hook chain, which states no order across calls, so each fence's writes settle before
 // the next fence's begin, or a superseded start's header write that the host completes late could land after the
-// current start's and name the wrong owner. The reads stay outside the chain, so a start that waits on a slow read
+// current start's and name the wrong instance. The reads stay outside the chain, so a start that waits on a slow read
 // holds no later start.
 let fenceWrites: Promise<unknown> = Promise.resolve()
 let settings: Settings | undefined
@@ -198,10 +197,8 @@ function backoff(attempt: number): number {
 
 function buildBody(session: SessionRecord, report: Report, nowMs: number): Body {
   session.sequence = nextSequence(session.sequence, nowMs)
-  // The router fences the session's requests by the owner its registration names, so every registration names it.
-  const fenced: Report = report.event === 'session_start' ? { ...report, owner_id: session.owner } : report
   const body: Body = {
-    ...fenced,
+    ...report,
     protocol: 1,
     session_id: session.id,
     instance_id: session.instance,
@@ -777,19 +774,17 @@ function persistModel($: EngineInterface): Promise<void> {
   return link
 }
 
-// The host keeps its state per session, and a clear or a resume raises no start, so no fence writes the pair under an
-// id the process adopts at a prompt. Held there, it serves a reload under that id once the store's list no longer
+// The host keeps its state per session, and a clear or a resume raises no start, so no fence writes the instance under
+// an id the process adopts at a prompt. Held there, it serves a reload under that id once the store's list no longer
 // holds the process. The step waits its turn behind the fence's writes, so it never lands inside them, and guarded
 // keeps a refused call from stalling the chain or reaching the caller.
 function keepIdentity($: EngineInterface, isCurrent: () => boolean): void {
   fenceWrites = fenceWrites.then(() => guarded(async () => {
     const { value: held } = await $.state.get(IDENTITY_REF)
-    // Taken behind the read, so the pair a start assigned meanwhile is the one written.
-    const pair = identity
-    if (pair === undefined || (held !== undefined && held.instance === pair.instance && held.owner === pair.owner)) {
-      return
-    }
-    if (isCurrent()) await $.state.set(IDENTITY_REF, pair)
+    // Taken behind the read, so the instance a start assigned meanwhile is the one written.
+    const own = identity
+    if (own === undefined || (held !== undefined && held.instance === own.instance)) return
+    if (isCurrent()) await $.state.set(IDENTITY_REF, own)
   }))
 }
 
@@ -820,7 +815,6 @@ async function ensureSession($: EngineInterface, isCurrent: () => boolean): Prom
   session = {
     id,
     instance: identity.instance,
-    owner: identity.owner,
     sequence: 0,
     generations: new Map(),
     announced: new Set(),
@@ -1298,7 +1292,7 @@ async function processIdentity($: EngineInterface): Promise<string | undefined> 
   hostProcess = { id }
   // Whether that parent is the client process rests on how the host spawns the shell, so the read shows in the log.
   if (id !== undefined) {
-    say($, `the client process reads as ${id}, which keys the pair the mod reuses across a clear`, { to: 'debug' })
+    say($, `the client process reads as ${id}, which keys the instance the mod reuses across a clear`, { to: 'debug' })
   }
   return id
 }
@@ -1313,14 +1307,14 @@ async function storedPairs($: EngineInterface): Promise<StoredPair[]> {
   const pairs: StoredPair[] = []
   for (const entry of value) {
     if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') continue
-    const [instance, owner] = [field(entry[1], 'instance'), field(entry[1], 'owner')]
-    if (typeof instance === 'string' && typeof owner === 'string') pairs.push([entry[0], { instance, owner }])
+    const instance = field(entry[1], 'instance')
+    if (typeof instance === 'string') pairs.push([entry[0], { instance }])
   }
   return pairs
 }
 
-async function keepPair($: EngineInterface, pairs: StoredPair[], processId: string, pair: Identity): Promise<void> {
-  const added: StoredPair = [processId, { instance: pair.instance, owner: pair.owner }]
+async function keepPair($: EngineInterface, pairs: StoredPair[], processId: string, own: Identity): Promise<void> {
+  const added: StoredPair = [processId, { instance: own.instance }]
   const kept: StoredPair[] = [...pairs.filter(([id]) => id !== processId), added].slice(-KEPT_IDENTITIES)
   if (JSON.stringify(kept) === JSON.stringify(pairs)) return
   // A store the host refuses to write costs the reuse after a clear alone, never the fence.
@@ -1329,44 +1323,40 @@ async function keepPair($: EngineInterface, pairs: StoredPair[], processId: stri
 
 // A later start owns the identity the relay must read, so each write goes out only while this start is current,
 // checked in the step that issues it.
-async function writeIdentity($: EngineInterface, isCurrent: () => boolean, pair: Identity, held: Identity | undefined,
+async function writeIdentity($: EngineInterface, isCurrent: () => boolean, own: Identity, held: Identity | undefined,
   existing: string | undefined, pairs: StoredPair[], processId: string | undefined): Promise<void> {
-  // A pair the fence reused from the host's state is there already.
-  if (pair !== held && isCurrent()) await $.state.set(IDENTITY_REF, pair)
-  if (processId !== undefined && isCurrent()) await keepPair($, pairs, processId, pair)
-  // The owner line replaces any line before it, so the relay reads one owner whatever the variable inherited.
-  if (isCurrent()) await $.env.set('ANTHROPIC_CUSTOM_HEADERS', ownerHeaderLines(existing, pair.owner))
-  if (isCurrent()) await $.env.set('PHOEBIS_KEEPALIVE_INSTANCE', pair.instance)
+  // An instance the fence reused from the host's state is there already.
+  if (own !== held && isCurrent()) await $.state.set(IDENTITY_REF, own)
+  if (processId !== undefined && isCurrent()) await keepPair($, pairs, processId, own)
+  // The line replaces any line of the header before it, so the relay reads one instance whatever the variable
+  // inherited.
+  if (isCurrent()) await $.env.set('ANTHROPIC_CUSTOM_HEADERS', instanceHeaderLines(existing, own.instance))
 }
 
-// The owner the router fences this process's requests by. A reload of the module, an enable or a worker respawn in
-// the same process keeps the pair under any session id of the process, so the router's session keeps its owner, and
-// any other process mints its own.
+// The instance the router tells this process's requests by. A reload of the module, an enable or a worker respawn in
+// the same process keeps it under any session id of the process, and any other process mints its own.
 async function fence($: EngineInterface, isCurrent: () => boolean): Promise<Identity> {
-  const [existing, variable, { value: held }] = await Promise.all([
+  const [existing, { value: held }] = await Promise.all([
     $.env.get('ANTHROPIC_CUSTOM_HEADERS'),
-    $.env.get('PHOEBIS_KEEPALIVE_INSTANCE'),
     $.state.get(IDENTITY_REF),
   ])
-  const owner = ownerOf(existing)
+  const named = instanceOf(existing)
   const processId = await processIdentity($)
   const pairs = processId === undefined ? [] : await storedPairs($)
-  let pair: Identity
-  if (held !== undefined && reusable(held, variable, owner)) {
-    pair = held
+  let own: Identity
+  if (held !== undefined && reusable(held, named)) {
+    own = held
   } else {
     // The host's state belongs to the session, so after a clear it holds nothing under the new id until the first
-    // prompt there, and the store's entry for this process is what still shows the pair was minted here.
+    // prompt there, and the store's entry for this process is what still shows the instance was minted here.
     const stored = pairs.find(([id]) => id === processId)?.[1]
-    pair = stored !== undefined && reusable(stored, variable, owner)
-      ? stored
-      : { instance: crypto.randomUUID(), owner: crypto.randomUUID() }
+    own = stored !== undefined && reusable(stored, named) ? stored : { instance: crypto.randomUUID() }
   }
-  const run = fenceWrites.then(() => writeIdentity($, isCurrent, pair, held, existing, pairs, processId))
+  const run = fenceWrites.then(() => writeIdentity($, isCurrent, own, held, existing, pairs, processId))
   // A fence whose writes reject must not stall the ones after it.
   fenceWrites = run.catch(() => undefined)
   await run
-  return pair
+  return own
 }
 
 /**
@@ -1377,14 +1367,14 @@ export async function startReporting($: EngineInterface, resolved: Settings, isC
   Promise<void> {
   // The earlier settings hold through every await here. Replaced sooner, they would let a pump register the record of
   // an older id that ensureSession is about to replace.
-  const [pair, defaultMs, maxMs] = await Promise.all([
+  const [own, defaultMs, maxMs] = await Promise.all([
     fence($, isCurrent),
     $.env.get('BASH_DEFAULT_TIMEOUT_MS'),
     $.env.get('BASH_MAX_TIMEOUT_MS'),
   ])
   // A later start that landed during the fence owns the identity, the bounds and the session it moves.
   if (!isCurrent()) return
-  identity = pair
+  identity = own
   bashBounds = { defaultMs: milliseconds(defaultMs), maxMs: milliseconds(maxMs) }
   // An overtaken call read a session that the host has left, and the module can still hold the record of an
   // earlier one, which the registration below would send under these settings. So the start reads the session

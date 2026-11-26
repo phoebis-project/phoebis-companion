@@ -1896,16 +1896,16 @@ test('the tracked work is written to the host\'s state as it changes', CONFIGURE
   expect(router.values.get('model')).toMatchObject({ released: ['agent-1'] })
 })
 
-// The host of a module reloaded in the same process: it holds the pair the earlier load minted and the work it tracked.
+// The host of a module reloaded in the same process: it holds the instance the earlier load minted and the work it
+// tracked.
 function reloaded(on: On, saved: unknown): { clock: MockClock; router: FakeRouter } {
   mock.env(on, {
     ANTHROPIC_AUTH_TOKEN: KEY,
-    ANTHROPIC_CUSTOM_HEADERS: 'X-Keepalive-Owner-Id: u-1',
-    PHOEBIS_KEEPALIVE_INSTANCE: 'i-1',
+    ANTHROPIC_CUSTOM_HEADERS: 'X-Phoebis-Instance-Id: i-1',
   })
   const clock = mock.clock(on, { now: T0 })
   const router = fakeRouter(on, clock, {
-    id: 'session-a', state: { instance: 'i-1', owner: 'u-1' }, values: { model: saved },
+    id: 'session-a', state: { instance: 'i-1' }, values: { model: saved },
   })
   return { clock, router }
 }

@@ -11,7 +11,7 @@ to the router ([Keepalive](../router/keepalive.md)), and what a key's companion 
 [Install and settings](install.md) covers installing the mod, its settings and the variables they fall back to.
 [The start check](start-check.md) says what the mod asks the router at session start, and [The allowance
 tool](allowance-tool.md) what the model reads through the tool. [What the mod reports](reports.md) lists each report
-with the parks, the presence and the owner header, and [Development](development.md) says how to verify a checkout.
+with the parks, the presence and the instance header, and [Development](development.md) says how to verify a checkout.
 
 ## Where it runs
 
@@ -22,6 +22,6 @@ key it reports, checks and answers the tool unless Claude Code refuses its fetch
 -p` run registers, reports its turns, its background commands and its subagents, and ends its session when it exits. The
 mod draws nothing beyond the toasts of the start check. Its messages are the transcript lines of
 [Configure](install.md#configure) and [The start check](start-check.md), the conflict line and the takeover line of [The
-owner header](reports.md#the-owner-header), and the lines in Claude Code's debug log: a dropped report, a refused key, a
-report whose fetch threw, a start hook that threw, a tool registration the engine refused, the allowance permission the
-operator withheld, and the client process's identity read at load.
+instance header](reports.md#the-instance-header), and the lines in Claude Code's debug log: a dropped report, a refused
+key, a report whose fetch threw, a start hook that threw, a tool registration the engine refused, the allowance
+permission the operator withheld, and the client process's identity read at load.

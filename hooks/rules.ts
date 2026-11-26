@@ -7,8 +7,7 @@ import type { AgentFactSet, Identity, SavedAgent, SavedCron, SavedTask, SessionF
 export type FactKind = 'agents' | 'project' | 'title'
 
 export type Report =
-  | { event: 'session_start'; reported_facts: FactKind[]; cache_warming: boolean; owner_id?: string;
-      previous_instance_id?: string }
+  | { event: 'session_start'; reported_facts: FactKind[]; cache_warming: boolean; previous_instance_id?: string }
   | { event: 'heartbeat' }
   | { event: 'session_end' }
   | { event: 'agent_start'; agent_id: string }
@@ -30,7 +29,7 @@ export type Body = Report & {
   request_generation?: number
 }
 
-const OWNER_HEADER = 'X-Keepalive-Owner-Id'
+const INSTANCE_HEADER = 'X-Phoebis-Instance-Id'
 const HEARTBEAT_MIN_MS = 1000
 const HEARTBEAT_MAX_MS = 25000
 
@@ -89,29 +88,29 @@ function headerLine(line: string): { name: string; value: string } | undefined {
   return at < 0 ? undefined : { name: line.slice(0, at).trim(), value: line.slice(at + 1).trim() }
 }
 
-// Header names are case-insensitive, so a line in any case is one the relay reads as the owner.
-function isOwnerLine(line: string): boolean {
-  return headerLine(line)?.name.toLowerCase() === OWNER_HEADER.toLowerCase()
+// Header names are case-insensitive, so a line in any case is one the relay reads as the instance.
+function isInstanceLine(line: string): boolean {
+  return headerLine(line)?.name.toLowerCase() === INSTANCE_HEADER.toLowerCase()
 }
 
-export function ownerOf(existing: string | undefined): string | undefined {
-  const owners = (existing ?? '').split(/\r?\n/).filter(isOwnerLine)
-  // Two owner lines leave which one a request carries to the client, so neither proves who wrote them.
-  if (owners.length !== 1) return undefined
-  const value = headerLine(owners[0] as string)?.value
+export function instanceOf(existing: string | undefined): string | undefined {
+  const lines = (existing ?? '').split(/\r?\n/).filter(isInstanceLine)
+  // Two instance lines leave which one a request carries to the client, so neither proves who wrote them.
+  if (lines.length !== 1) return undefined
+  const value = headerLine(lines[0] as string)?.value
   return value === undefined || value === '' ? undefined : value
 }
 
-export function ownerHeaderLines(existing: string | undefined, uuid: string): string {
-  const kept = (existing ?? '').split(/\r?\n/).filter((line) => line.trim() !== '' && !isOwnerLine(line))
-  return [...kept, `${OWNER_HEADER}: ${uuid}`].join('\n')
+export function instanceHeaderLines(existing: string | undefined, uuid: string): string {
+  const kept = (existing ?? '').split(/\r?\n/).filter((line) => line.trim() !== '' && !isInstanceLine(line))
+  return [...kept, `${INSTANCE_HEADER}: ${uuid}`].join('\n')
 }
 
-// The variables alone are inherited by every process this one starts, so only a record kept for this process, the
-// host's state for the session or the store's entry under the process's identity, shows that this load runs where the
-// pair was minted.
-export function reusable(held: Identity, variable: string | undefined, headerOwner: string | undefined): boolean {
-  return variable !== undefined && headerOwner !== undefined && held.instance === variable && held.owner === headerOwner
+// The header line is inherited by every process this one starts, so only a record kept for this process, the host's
+// state for the session or the store's entry under the process's identity, shows that this load runs where the instance
+// was minted.
+export function reusable(held: Identity, headerInstance: string | undefined): boolean {
+  return headerInstance !== undefined && held.instance === headerInstance
 }
 
 // From the clock, so a record that starts over after a reload or a return to an earlier id is never behind the

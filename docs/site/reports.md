@@ -8,7 +8,7 @@ relay](../router/relay.md#the-keepalive-protocol).
 
 | Mod event | Fact | Report |
 | --- | --- | --- |
-| `session.start` | the process is up | the owner fence, then `session_start` |
+| `session.start` | the process is up | the instance fence, then `session_start` |
 | `classic.SessionStart` | the session's custom title, with Session title reports on | none of its own: the mod keeps the title for the next read |
 | `prompt.submit` from `bridge`, `composer`, `sdk` or `slack-ping` | a real prompt | `activity` kind `prompt` for main |
 | `prompt.submit` from `scheduled-trigger` | a cron or a wakeup fired | it leaves the crons or moves to its next fire |
@@ -157,28 +157,29 @@ never start an agent, and the set goes out again behind the agent's next acknowl
 acknowledged survives a reload, as the session's does. A description or a name is cut at 256 bytes on a whole character,
 and a type over 256 bytes is left out. A workflow's agents and main report none.
 
-## The owner header
+<a id="the-owner-header"></a>
 
-At session start the mod fences the process: it mints two v4 uuids, the owner id and the instance id, and writes one
-`X-Keepalive-Owner-Id: <owner id>` line into `ANTHROPIC_CUSTOM_HEADERS`. That line replaces any owner line already
-there, whatever the case of the header's name, and the variable keeps its other lines. Claude Code sends the header on
-every model request of the process, so the router can tell this process's requests from another process's on the same
-session id. The mod keeps the instance id in `PHOEBIS_KEEPALIVE_INSTANCE`. Every report names the instance, and every
-`session_start` names the owner as `owner_id`, which no other report carries. A `/clear` or a `/resume` keeps both ids,
-since the owner is the process.
+## The instance header
+
+At session start the mod fences the process: it mints one v4 uuid, the instance id, and writes one
+`X-Phoebis-Instance-Id: <instance id>` line into `ANTHROPIC_CUSTOM_HEADERS`. That line replaces any line of the same
+header already there, whatever the case of the header's name, and the variable keeps its other lines. Claude Code sends
+the header on each model request of the process, and each report names the same id, so the router can tell this
+process's requests from another process's on the same session id. A `/clear` or a `/resume` keeps the id, since the
+instance is the process.
 
 Claude Code holds the plugin's own state per session, and that state survives a hot reload of the module. The mod keeps
-the pair in that state under each session id it adopts: at session start, and at the first prompt after a `/clear` or a
-`/resume` moves the process to another id. The mod also keeps the pair in the plugin's store under the key `identities`,
-beside the identity of the client process it was minted in, for the newest eight processes. The store outlives the
-session, so a reload that comes before the first prompt under a new id finds the pair there while the store's list still
-holds the process. A reload reuses the pair while the two variables still name it, so the owner line and the instance
-stay, and the router's session keeps its owner. A child process inherits the two variables but runs as another process,
-for which the store holds no pair, so it mints its own pair and registers as its own instance. Where Claude Code cannot
-run the command that reads the process's identity, a reload that comes before the first prompt under a new id mints a
-new pair. A child process that never runs the fence keeps the parent's owner line: one on a client that does not load
-the mod ([Install](install.md#install)), one with the mod disabled, or one without a URL or a key. That line matters
-only for a child that sends the parent's session id.
+the instance in that state under each session id it adopts: at session start, and at the first prompt after a `/clear`
+or a `/resume` moves the process to another id. The mod also keeps the instance in the plugin's store under the key
+`identities`, beside the identity of the client process it was minted in, for the newest eight processes. The store
+outlives the session, so a reload that comes before the first prompt under a new id finds the instance there while the
+store's list still holds the process. A reload reuses the instance while the header line still names it, so the line
+stays as it is, and the router's session keeps its instance. A child process inherits the line but runs as another
+process, for which the store holds no instance, so it mints its own and registers under it. Where Claude Code cannot run
+the command that reads the process's identity, a reload that comes before the first prompt under a new id mints a new
+instance. A child process that never runs the fence keeps the parent's line: one on a client that does not load the mod
+([Install](install.md#install)), one with the mod disabled, or one without a URL or a key. That line matters only for a
+child that sends the parent's session id.
 
 A `session_start` the router refuses with a bare `instance_conflict`, since another instance holds the session under a
 live lease, leaves the session live. The mod writes one line to the transcript, `phoebis-companion: another instance
@@ -188,8 +189,8 @@ under the mod's name. Once the holder's 90-second lease lapses, the router names
 start takes the session over with `previous_instance_id`: the router replaces the session's agents, the next requests
 arm recipes again, and the mod writes `phoebis-companion: took over session <id> from a silent instance`.
 
-What the router does with a request whose owner header names another owner than the session's registration is on the
-router's page [The companion mod](../router/companion-mod.md), under "An owner mismatch".
+What the router does with a request whose instance header names another instance than the session's registration is on
+the router's page [The companion mod](../router/companion-mod.md), under "An instance mismatch".
 
 ## What the mod leaves alone
 
