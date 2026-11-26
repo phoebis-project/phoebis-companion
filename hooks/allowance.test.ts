@@ -231,7 +231,7 @@ test('the start whose session id read lands last holds the reports and the tool 
   // Past the cache window of the first start's read, so the call reads the router itself.
   await clock.set(T0 + 12_000)
   await call($)
-  expect(router.targets.at(-1)?.url).toBe(`${ROUTER}/v0/keepalive/events`)
+  expect(router.targets.at(-1)?.url).toBe(`${ROUTER}/v0/companion/events`)
   expect(router.gets.at(-1)).toEqual({
     url: `${ROUTER}/v0/companion/allowance?session_id=session-a`,
     headers: { authorization: 'Bearer k-a' },
@@ -287,7 +287,7 @@ test('a start that works behind a failed one keeps the configuration when an ear
     await clock.set(T0 + 12_000)
     const gets = router.gets.length
     await call($)
-    expect(reported).toEqual(['http://127.0.0.1:3/v0/keepalive/events'])
+    expect(reported).toEqual(['http://127.0.0.1:3/v0/companion/events'])
     expect(router.gets.slice(gets)).toEqual([{
       url: 'http://127.0.0.1:3/v0/companion/allowance?session_id=session-a',
       headers: { authorization: 'Bearer k-c' },
@@ -637,7 +637,7 @@ test('a second session start registers the tool again under the same name', CONF
   expect(router.tools.map((tool) => tool.name)).toEqual(['allowance', 'allowance'])
 })
 
-test('a registration the engine rejects costs the tool alone, with one debug line, and the keepalive still starts',
+test('a registration the engine rejects costs the tool alone, with one debug line, and the reporting still starts',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
     router.denyRegister('tool limit reached')

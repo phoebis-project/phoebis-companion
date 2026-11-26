@@ -279,7 +279,7 @@ test('a fetch that throws writes one debug line naming the report and the error,
 test('a fetch that throws with the request in its message logs the line without the key or the URL credentials',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
-    const fail = `fetch to http://user:${KEY} two@127.0.0.1:1/v0/keepalive/events failed with bearer ${KEY}`
+    const fail = `fetch to http://user:${KEY} two@127.0.0.1:1/v0/companion/events failed with bearer ${KEY}`
     router.answer(() => ({ fail }))
     await start($, clock)
     await clock.advance(1001)
@@ -288,7 +288,7 @@ test('a fetch that throws with the request in its message logs the line without 
     expect(debug).toHaveLength(1)
     expect(debug[0]?.text).toContain('the session_start report could not be sent (')
     expect(debug[0]?.text).toContain('unless the session ends first')
-    expect(debug[0]?.text).toContain('http://<redacted>@127.0.0.1:1/v0/keepalive/events')
+    expect(debug[0]?.text).toContain('http://<redacted>@127.0.0.1:1/v0/companion/events')
     expect(debug[0]?.text).toContain('bearer <key>')
     expect(debug[0]?.text).not.toContain(KEY)
     expect(debug[0]?.text).not.toContain('user:')
@@ -326,15 +326,15 @@ test('an edit whose lower hook rejects still queues the presence', CONFIGURED, a
 })
 
 test('redactSecrets takes the configured key and a URL\'s userinfo out of a message and leaves the rest', () => {
-  expect(redactSecrets(`fetch to http://user:${KEY}@127.0.0.1:1/v0/keepalive/events failed with bearer ${KEY}`, KEY))
-    .toBe('fetch to http://<redacted>@127.0.0.1:1/v0/keepalive/events failed with bearer <key>')
+  expect(redactSecrets(`fetch to http://user:${KEY}@127.0.0.1:1/v0/companion/events failed with bearer ${KEY}`, KEY))
+    .toBe('fetch to http://<redacted>@127.0.0.1:1/v0/companion/events failed with bearer <key>')
   expect(redactSecrets('https://alice:hunter2@router.example/v0 refused', KEY))
     .toBe('https://<redacted>@router.example/v0 refused')
   expect(redactSecrets('connection refused', KEY)).toBe('connection refused')
   expect(redactSecrets(`bearer ${KEY}`, '')).toBe(`bearer ${KEY}`)
   expect(redactSecrets('https://u:p@ss@h.example/v0', KEY)).toBe('https://<redacted>@h.example/v0')
-  expect(redactSecrets('fetch https://alice:two words@router.example/v0/keepalive/events failed', KEY))
-    .toBe('fetch https://<redacted>@router.example/v0/keepalive/events failed')
+  expect(redactSecrets('fetch https://alice:two words@router.example/v0/companion/events failed', KEY))
+    .toBe('fetch https://<redacted>@router.example/v0/companion/events failed')
 })
 
 test('queued reports collapse into one heartbeat, the newest state per agent and a prompt over a presence', () => {
@@ -1040,7 +1040,7 @@ describe('the request is a POST of protocol 1 to the events path with a JSON con
     await prompt($, clock)
     await end($, clock, 'other', 'session-a')
     expect(events(router)).toEqual(['session_start', 'activity', 'session_end'])
-    expect(router.targets).toEqual(Array(3).fill({ method: 'POST', url: `${ROUTER_URL}/r/v0/keepalive/events` }))
+    expect(router.targets).toEqual(Array(3).fill({ method: 'POST', url: `${ROUTER_URL}/r/v0/companion/events` }))
     for (const headers of router.headers) expect(headers['Content-Type']).toBe('application/json')
     for (const body of router.requests) expect(body.protocol).toBe(1)
     expect(router.refusals).toEqual([])

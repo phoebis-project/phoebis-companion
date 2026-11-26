@@ -2,9 +2,9 @@
 
 The mod reports on main, the session's own agent, and on each subagent the client lists. Each agent has an open set: the
 background commands and the subagents it started that have not ended yet. The session's crons and wakeups belong to
-main. Every report is one request to the router's keepalive route, and the route, the eight events with their fields,
-the acknowledgment, the refusal codes and how the mod queues, sends and retries are on [The
-relay](../router/relay.md#the-keepalive-protocol).
+main. Every report is one request to the router's events route, and the route, the eight events with their fields, the
+acknowledgment, the refusal codes and how the mod queues, sends and retries are on [The
+relay](../router/relay.md#the-companion-protocol).
 
 | Mod event | Fact | Report |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ set sent holds a fact or where a report the router did not confirm is still owed
 record may be a new one. The mod cleans each value before it sends it: each run of line breaks and tabs folds to one
 space, control characters, format characters and unpaired surrogates go, the ends are trimmed, and a title past 256
 bytes is cut on a whole character. The router applies the same rules, and [the event's
-members](../router/relay.md#the-keepalive-protocol) are on the router's page The relay.
+members](../router/relay.md#the-companion-protocol) are on the router's page The relay.
 
 A facts report goes out behind each lifecycle report in the queue and waits under a backoff of its own, so a report the
 router refuses or cannot take costs the facts alone and never a heartbeat. A request with no answer within 10 seconds

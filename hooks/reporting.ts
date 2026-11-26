@@ -60,7 +60,7 @@ import type { FactOptions, Settings } from './settings'
 const MAIN = 'main'
 // The router's codes are snake_case words, so anything else an answer carries stays out of the log.
 const CODE = /^[a-z_]{1,64}$/
-const EVENTS_PATH = '/v0/keepalive/events'
+const EVENTS_PATH = '/v0/companion/events'
 // The loader lists what a $.state call names only from a reference no importer can change.
 const IDENTITY_REF = { plugin: 'phoebis-companion', key: 'identity' } as const
 const MODEL_REF = { plugin: 'phoebis-companion', key: 'model' } as const

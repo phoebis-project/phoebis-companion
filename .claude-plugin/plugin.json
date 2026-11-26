@@ -1,9 +1,9 @@
 {
   "name": "phoebis-companion",
   "version": "0.1.0",
-  "description": "Reports session liveness to Phoebis Router and gives the model the pool's allowance",
+  "description": "Reports a session and its agents to Phoebis Router and gives the model the pool's allowance",
   "author": {"name": "Florian Bernd"},
-  "keywords": ["allowance", "cache", "keepalive", "lifecycle"],
+  "keywords": ["allowance", "cache", "lifecycle", "sessions"],
   "types": "./types/index.d.ts",
   "userConfig": {
     "management_url": { "type": "string", "title": "Management URL", "default": "",

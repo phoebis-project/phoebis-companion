@@ -1,12 +1,13 @@
 # Phoebis Companion
 
 This part is for the operator installing and configuring the companion mod on a client machine. The mod is a Claude Code
-plugin that runs inside the Claude Code process. It reports session liveness and agent state to the router, which the
-router's keepalive engine reads to decide which sessions' prompt caches to keep warm, checks the router at session start
-and names a misconfiguration in the session, and gives the model one tool, `allowance`, which reads what the key's pool
-has left so the model can pace its own work. The mod reports facts and holds no policy: every ceiling and switch belongs
-to the router ([Keepalive](../router/keepalive.md)), and what a key's companion may do is a permission set on the key
-([The key's permissions](../router/companion-mod.md#the-keys-permissions)).
+plugin that runs inside the Claude Code process. It reports a session, its agents and their states to the router, whose
+session engine keeps them for the console and whose cache warming reads them to decide which sessions' prompt caches to
+keep warm, checks the router at session start and names a misconfiguration in the session, and gives the model one tool,
+`allowance`, which reads what the key's pool has left so the model can pace its own work. The mod reports facts and
+holds no policy: every ceiling and switch belongs to the router ([Keepalive](../router/keepalive.md)), and what a key's
+companion may do is a permission set on the key ([The key's
+permissions](../router/companion-mod.md#the-keys-permissions)).
 
 [Install and settings](install.md) covers installing the mod, its settings and the variables they fall back to.
 [The start check](start-check.md) says what the mod asks the router at session start, and [The allowance

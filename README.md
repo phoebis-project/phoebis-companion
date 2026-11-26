@@ -6,12 +6,12 @@
   </picture>
 </div>
 
-Phoebis Companion is a Claude Code plugin for sessions that reach Claude through Phoebis Router. The mod reports session
-liveness and agent state to the router, which reads the reports to decide which sessions' prompt caches to keep warm. At
-session start it checks the router once and names a misconfiguration in the session, and it gives the model one tool,
-`allowance`, which reads what the key's pool has left so the model can pace its own work. The mod reports facts and
-holds no policy: every ceiling and switch belongs to the router, and what a key's companion may do is a permission set
-on the key.
+Phoebis Companion is a Claude Code plugin for sessions that reach Claude through Phoebis Router. The mod reports a
+session, its agents and their states to the router, which shows them in its console and reads them to decide which
+sessions' prompt caches to keep warm. At session start it checks the router once and names a misconfiguration in the
+session, and it gives the model one tool, `allowance`, which reads what the key's pool has left so the model can pace
+its own work. The mod reports facts and holds no policy: every ceiling and switch belongs to the router, and what a
+key's companion may do is a permission set on the key.
 
 The documentation lives under [`docs/site/`](docs/site/index.md), starting with [Install and
 settings](docs/site/install.md), and is published at <https://phoebis-project.github.io/phoebis-docs/>. It covers the
