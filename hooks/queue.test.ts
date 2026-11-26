@@ -660,6 +660,46 @@ test('a tick whose id read lands after a clear leaves the new id to its first pr
   ])
 })
 
+test('a heartbeat whose id read does not answer within five seconds sends nothing and reads the id again one ' +
+  'interval later', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  router.delayId(120_000)
+  // Twenty five seconds to the heartbeat, five to the read's limit, and twenty five to the next read.
+  await clock.advance(54_999)
+  expect(events(router)).toEqual(['session_start'])
+  await clock.advance(1)
+  expect(events(router)).toEqual(['session_start', 'heartbeat'])
+  expect(router.times).toEqual([T0, T0 + 55_000])
+})
+
+test('a heartbeat whose id read the host refuses sends nothing and reads the id again one interval later',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    router.denyId('another hook refuses the read')
+    await clock.advance(49_999)
+    expect(events(router)).toEqual(['session_start'])
+    await clock.advance(1)
+    expect(events(router)).toEqual(['session_start', 'heartbeat'])
+    expect(router.times).toEqual([T0, T0 + 50_000])
+  })
+
+test('a heartbeat whose id read fails behind a newer registration\'s answer sets no second timer', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    router.delayId(120_000)
+    await clock.advance(25_000)
+    // A second start under the same settings registers again a second into the heartbeat's read.
+    await clock.advance(1_000)
+    await start($, clock)
+    // The read's limit passes at thirty seconds, and the second registration's answer holds the heartbeats.
+    await clock.advance(50_000)
+    expect(events(router)).toEqual(['session_start', 'session_start', 'heartbeat', 'heartbeat'])
+    expect(router.times).toEqual([T0, T0 + 26_000, T0 + 51_000, T0 + 76_000])
+  })
+
 test('a registration refused twice in a row with the same code waits the backoff before it is sent again',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)

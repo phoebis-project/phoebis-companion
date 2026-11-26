@@ -50,10 +50,12 @@ reads the new id registers it under the same instance. Nothing the old session h
 each heartbeat the mod also releases the subagents the client's agent list reads `completed`, `failed` or `killed` or no
 longer lists, and closes the background commands past their deadline. A read of the client's agent list that does not
 answer within 5 seconds counts as a failed read, at a heartbeat, behind a registration, at a loop the mod meets first
-and at the end of a subagent's turn, and the next read asks again. The agent list describes the agents the mod held when
-it asked for it, so a subagent spawned while the answer was out is judged at the next heartbeat, and an answer that
-arrives after a `/clear` or a `/resume` replaced the session is dropped. A tool result or a spawn answer that lands
-after such a replacement is dropped the same way: the work belongs to the session that started it.
+and at the end of a subagent's turn, and the next read asks again. A read of the session id at a heartbeat that the host
+refuses, or does not answer within 5 seconds, sends no heartbeat, and the mod reads the id again one heartbeat interval
+later. The agent list describes the agents the mod held when it asked for it, so a subagent spawned while the answer was
+out is judged at the next heartbeat, and an answer that arrives after a `/clear` or a `/resume` replaced the session is
+dropped. A tool result or a spawn answer that lands after such a replacement is dropped the same way: the work belongs
+to the session that started it.
 
 The mod writes its tracked work, each agent's open set, the session's crons, the subagents it released and those the
 router last named released, to the plugin's host state whenever it changes. A write that the host refuses, or does not

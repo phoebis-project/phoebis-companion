@@ -72,16 +72,17 @@ const IDENTITY_PREFIX = 'identity:'
 const KEPT_IDENTITIES = 8
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000]
 // A request with no answer by then counts as a failed send. Ten seconds leave five tries of a heartbeat inside one
-// lease of 90 seconds, and a shorter limit would send a report twice that was only slow.
+// lease of 90 seconds, four behind a tick whose two reads take their five seconds each, and a shorter limit would send
+// a report twice that was only slow.
 const REQUEST_LIMIT_MS = 10000
 // A write of a saved value that has not landed by then is abandoned. A link starts its writes together, two at most,
 // and a pump waits for the link that runs and for the one behind it, so a hung state call holds the pump ten seconds at
-// most and, with the tick's hung list read ahead of it and a hung request behind it, a due heartbeat twenty five.
+// most and, with the tick's two reads ahead of it and a hung request behind it, a due heartbeat thirty.
 const WRITE_LIMIT_MS = 5000
-// A read of the client's agent list with no answer by then counts as a failed read. With the request's ten seconds
-// ahead of it, a registration's answer is handled inside fifteen seconds of a lease of 90, and a tick queues its
-// heartbeat five seconds late at most.
-const LIST_LIMIT_MS = 5000
+// A read of the host with no answer by then counts as a failed read, as one the host refuses does. With the request's
+// ten seconds ahead of it, a registration's answer is handled inside fifteen seconds of a lease of 90, and a tick
+// queues its heartbeat ten seconds late at most, behind the session id's read and the agent list's.
+const READ_LIMIT_MS = 5000
 
 type SessionRecord = {
   id: string
@@ -96,6 +97,8 @@ type SessionRecord = {
   // A start refused for a live holder told the person it waits, so the takeover that ends the wait is told once too.
   conflicted?: boolean
   heartbeatAt?: number
+  // The wait the acknowledgment set ahead of `heartbeatAt`, which a tick whose id read failed waits again.
+  heartbeatWait?: number
 }
 
 type Backoff = { attempt: number; retryAt?: number }
@@ -640,10 +643,10 @@ function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): voi
   }
 }
 
-function agentList($: EngineInterface): Promise<AgentInfo[] | undefined> {
+function limitedRead<T>($: EngineInterface, call: () => Promise<T>): Promise<T | undefined> {
   return guarded(async () => {
-    const read = $.agent.list()
-    // The race is the one reader of the list, so an answer behind the limit reaches no caller. A rejection behind the
+    const read = call()
+    // The race is the one reader of the call, so an answer behind the limit reaches no caller. A rejection behind the
     // limit is dropped on purpose: the race already holds it, and this handler says so at the call.
     read.catch(() => undefined)
     // The limit's wait is a call that the host holds open, so it ends with the race and none outlives its read.
@@ -651,12 +654,16 @@ function agentList($: EngineInterface): Promise<AgentInfo[] | undefined> {
     try {
       return await Promise.race([
         read,
-        $.clock.sleep(LIST_LIMIT_MS, { signal: limit.signal }).then(() => undefined),
+        $.clock.sleep(READ_LIMIT_MS, { signal: limit.signal }).then(() => undefined),
       ])
     } finally {
       limit.abort()
     }
   })
+}
+
+function agentList($: EngineInterface): Promise<AgentInfo[] | undefined> {
+  return limitedRead($, () => $.agent.list())
 }
 
 function startReport(previousInstance?: string): Report {
@@ -1139,6 +1146,7 @@ function acknowledged($: EngineInterface, record: SessionRecord, report: Report,
   if ((report.event === 'session_start' || report.event === 'heartbeat') && ack.lease_expires_ms !== undefined) {
     const at = now + heartbeatInterval(ack.lease_expires_ms, now)
     record.heartbeatAt = at
+    record.heartbeatWait = at - now
     timer?.cancel()
     timer = $.clock.after(at - now, () => tick($))
   }
@@ -1294,9 +1302,23 @@ function tick($: EngineInterface): void {
   void (async () => {
     try {
       if (!active()) return
+      const record = session
+      const due = record?.heartbeatAt
       // A tick serves the record the host still holds. An id that is not the record's was read across a clear or a
       // resume, and neither raises a start, so the tick leaves the new conversation to its first prompt.
-      const id = await $.session.id()
+      const id = await limitedRead($, () => $.session.id())
+      if (id === undefined) {
+        // The mod cannot tell which session the host holds, so the tick sends nothing and reads the id again one
+        // interval later. An acknowledgment that moved the heartbeat while the read was out set a newer timer, which
+        // stands.
+        const wait = record?.heartbeatWait
+        if (record !== undefined && session === record && !record.stopped && record.heartbeatAt === due &&
+          wait !== undefined) {
+          timer?.cancel()
+          timer = $.clock.after(wait, () => tick($))
+        }
+        return
+      }
       if (session?.id !== id) return
       // A failed reconcile must not cost the lease, so the heartbeat goes out either way.
       if (live()) await reconcile($).catch(() => undefined)
