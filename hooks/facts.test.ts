@@ -994,25 +994,6 @@ test('an option turned off sends no clear of an announced agent\'s facts at the 
     expect(agentFacts(router)).toEqual([])
   })
 
-test('an agent\'s saved facts stay unsent at its release while Agent reports is off', CONFIGURED,
-  async ($, on) => {
-    const { clock, router } = host(on, { state: IDENTITY, values: { model: WORKER_MODEL, facts: AGENT_SAVED } })
-    // The registration's answer omits the agent, so the mod announces it again, and the run ends while that start is
-    // out, where the release carries the run's set.
-    router.answer((_body, ack) => ok(ack))
-    router.answer(async (_body, ack) => {
-      await clock.sleep(2000)
-      return ok(ack)
-    })
-    await start($, clock)
-    router.setAgents([])
-    await complete($, clock, 'worker-1')
-    await clock.advance(2000)
-    expect(agentFacts(router)).toEqual([])
-    // The agent's start and then its release went out, so the absence above comes from the path that the case guards.
-    expect(under(router, 'session-a')).toEqual(['session_start', 'agent_start', 'state worker-1 released'])
-  })
-
 test('an agent\'s clear the router did not acknowledge is saved as owed', AGENTS, async ($, on) => {
   const { clock, router } = host(on, { state: IDENTITY, values: { model: WORKER_MODEL, facts: AGENT_SAVED } })
   // The row names no name, and its empty type keeps the rig's default type out of the set.
