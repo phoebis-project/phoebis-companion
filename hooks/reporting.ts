@@ -1073,10 +1073,11 @@ function settle($: EngineInterface, config: Settings, record: SessionRecord, rep
     return
   }
   const answer = response?.ok === true ? answerOf(response.text) : undefined
-  // A facts report settles on the router's acknowledgment alone, which names the session and the report's sequence,
-  // the record's while the report is out. A 2xx page from something in front of the router would otherwise drop the
-  // owed mark of a clear for good, and the router would keep the withdrawn value.
-  const unacknowledged = answer !== undefined && isFacts(report) &&
+  // A report settles on the router's acknowledgment alone, which names the session and the report's sequence, the
+  // record's while the report is out. A 2xx page from something in front of the router would otherwise schedule no
+  // heartbeat behind a registration or a heartbeat, count an agent as announced, or drop the owed mark of a clear for
+  // good.
+  const unacknowledged = answer !== undefined &&
     (answer.session_id !== record.id || answer.sequence !== record.sequence)
   if (response === undefined || response.status === 429 || response.status >= 500 || unacknowledged) {
     queue.reports = restore(queue.reports, report)

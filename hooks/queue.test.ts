@@ -272,6 +272,19 @@ test('a registration whose list read never answers schedules its heartbeat once 
     expect(router.times).toEqual([T0, T0 + 30_000])
   })
 
+test('a heartbeat that a page answers with 200 goes out again under the backoff', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  router.answer((_body, ack) => ok(ack))
+  // Something in front of the router answers the heartbeat with a page of its own.
+  router.answer(() => ({ status: 200, body: '<!doctype html>' }))
+  await start($, clock)
+  await clock.advance(25_999)
+  expect(events(router)).toEqual(['session_start', 'heartbeat'])
+  await clock.advance(1)
+  expect(events(router)).toEqual(['session_start', 'heartbeat', 'heartbeat'])
+  expect(router.times).toEqual([T0, T0 + 25_000, T0 + 26_000])
+})
+
 test('a fetch that throws writes one debug line naming the report and the error, and a 5xx writes none',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
