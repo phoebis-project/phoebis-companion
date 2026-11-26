@@ -676,7 +676,9 @@ test('a recurring cron leaves after the fire at which it is seven days old, as t
   expect(router.times[idle]).toBe(local(22, 10, 0))
 })
 
-test('a one-shot due in nine days parks main until it fires, past any age limit', CONFIGURED, async ($, on) => {
+// The case runs about two days of heartbeats on the mock clock, each with its reads and a request.
+const CONFIGURED_LONG = { ...CONFIGURED, timeoutMs: 30_000 }
+test('a one-shot due in nine days parks main until it fires, past any age limit', CONFIGURED_LONG, async ($, on) => {
   const { clock, router } = host(on, local(14, 10, 0))
   await start($, clock)
   await submit($, clock, 'composer')
