@@ -20,6 +20,9 @@ permissions:
 concurrency:
   group: release-${{ github.event.release.tag_name || github.ref }}
   cancel-in-progress: false
+env:
+  CATALOG_FILE: repos/phoebis-project/phoebis-marketplace/contents/.claude-plugin/marketplace.json
+  ENTRY: phoebis-companion
 jobs:
   guard:
     runs-on: ubuntu-24.04
@@ -109,8 +112,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
-          gh api 'repos/phoebis-project/phoebis-marketplace/contents/.claude-plugin/marketplace.json?ref=main' \
-            > answer.json
+          gh api "$CATALOG_FILE?ref=main" > answer.json
           jq -r .content answer.json | base64 --decode > old.json
           echo "blob=$(jq -r .sha answer.json)" >> "$GITHUB_OUTPUT"
       # The decision makes no network call, so the block runs as it stands against a sample of the catalog's file.
@@ -120,9 +122,9 @@ jobs:
           SHA: ${{ github.sha }}
           TAG: ${{ needs.guard.outputs.version }}
         run: |
-          entry='.plugins[] | select(.name == "phoebis-companion")'
+          entry=".plugins[] | select(.name == \"$ENTRY\")"
           jq -e "[$entry] | length == 1" old.json > /dev/null \
-            || { echo "the catalog has no entry 'phoebis-companion'"; exit 1; }
+            || { echo "the catalog has no entry '$ENTRY'"; exit 1; }
           ref=$(jq -r "$entry | .source.ref? // empty" old.json)
           sha=$(jq -r "$entry | .source.sha? // empty" old.json)
           if [ "$ref" = "$TAG" ] && [ "$sha" = "$SHA" ]; then
@@ -150,6 +152,6 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           TAG: ${{ needs.guard.outputs.version }}
         run: |
-          gh api -X PUT repos/phoebis-project/phoebis-marketplace/contents/.claude-plugin/marketplace.json \
-            -f branch=main -f message="Name phoebis-companion $TAG" -f content="$(base64 -w 0 new.json)" \
+          gh api -X PUT "$CATALOG_FILE" \
+            -f branch=main -f message="Name $ENTRY $TAG" -f content="$(base64 -w 0 new.json)" \
             -f sha="$BLOB" > /dev/null
