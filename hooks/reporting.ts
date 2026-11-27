@@ -131,6 +131,9 @@ type Model = {
   // The subagents this run released, until the client spawns one again or gives it a turn: a registration's answer
   // that still names one of them describes the run the release ends, so the client's list does not re-adopt it.
   released: Set<string>
+  // Each teammate's address with the client id that holds it. A teammate's events and list row name it by the client
+  // id, while its requests carry the address, so the router files it under the address and the model keys it there too.
+  addresses: Map<string, string>
 }
 
 // The client's list as a registration read it, with the subagents the mod held when it asked. The answer arrives later,
@@ -259,6 +262,7 @@ function freshModel(): Model {
     turning: new Set(),
     current: new Set(),
     released: new Set(),
+    addresses: new Map(),
   }
 }
 
@@ -362,11 +366,52 @@ function release(agentId: string): void {
   }
 }
 
+// The id the router files an agent's requests under, which keys the model: a teammate's address, and the client's id
+// for any other agent.
+function wireOf(agentId: string): string {
+  for (const [address, holder] of model.addresses) if (holder === agentId) return address
+  return agentId
+}
+
+// A read of the client's list hands each teammate's address to a row. A row takes an address that another client id
+// holds only while the row is live and the holder's row ended or left the list, since a respawn under the name keeps
+// the address and an ended teammate's row can stay listed for seconds beside the new run's.
+function noteTeammates(rows: AgentInfo[]): void {
+  const byId = new Map(rows.map((agent) => [agent.id, agent]))
+  for (const row of rows) {
+    const address = row.teammateId
+    if (address === undefined) continue
+    const holder = model.addresses.get(address)
+    const holderRow = holder === undefined ? undefined : byId.get(holder)
+    const takes = holder === undefined ||
+      (LIVE.has(row.status) && (holderRow === undefined || ENDED.has(holderRow.status)))
+    if (takes) model.addresses.set(address, row.id)
+  }
+}
+
+// The agent a list row stands for. A row whose address another client id holds stands for none, so it starts, rests
+// and ends nothing.
+function rowWire(info: AgentInfo): string | undefined {
+  if (info.teammateId !== undefined && model.addresses.get(info.teammateId) !== info.id) return undefined
+  return wireOf(info.id)
+}
+
+// The rows of a list read by the agent each stands for, so a teammate's record meets the row of the client id that
+// holds its address.
+function rowsByWire(rows: AgentInfo[]): Map<string, AgentInfo> {
+  noteTeammates(rows)
+  const listed = new Map<string, AgentInfo>()
+  for (const info of rows) {
+    const agentId = rowWire(info)
+    if (agentId !== undefined) listed.set(agentId, info)
+  }
+  return listed
+}
+
 // A live agent the mod meets first in the client's list or the router's answer (one that ran before this load, or one
 // resumed after its release) joins its parent's open set, so the parent stays parked on it until it ends.
-function adopt(info: AgentInfo, state: AgentRecord['state']): void {
-  const agentId = info.id
-  const parent = info.parentId ?? MAIN
+function adopt(agentId: string, info: AgentInfo, state: AgentRecord['state']): void {
+  const parent = info.parentId === undefined ? MAIN : wireOf(info.parentId)
   const agent = freshRecord(agentId, state, parent)
   agentListed(agentId, info)
   model.released.delete(agentId)
@@ -379,7 +424,8 @@ function adopt(info: AgentInfo, state: AgentRecord['state']): void {
 // The agent an event of this loop counts for, once the mod has judged the loop.
 function holder(agentId: string | undefined): string | undefined {
   if (agentId === undefined) return MAIN
-  if (model.agents.has(agentId)) return agentId
+  const wire = wireOf(agentId)
+  if (model.agents.has(wire)) return wire
   const host = model.unlisted.get(agentId)
   if (host === undefined) return undefined
   return model.agents.has(host) ? host : MAIN
@@ -395,10 +441,13 @@ async function attribute($: EngineInterface, agentId: string | undefined): Promi
   // The list answers for the session that asked. Under a session a clear or a resume put in its place, an adoption
   // would start the earlier session's agent on the router, so the event counts for no agent.
   if (session !== record) return undefined
+  if (listed !== undefined) noteTeammates(listed)
   const info = listed?.find((agent) => agent.id === agentId)
   if (info !== undefined) {
-    adopt(info, 'idle')
-    return agentId
+    const wire = rowWire(info)
+    // The row's address can belong to a record the mod already holds, and that record keeps its open set.
+    if (wire !== undefined && !model.agents.has(wire)) adopt(wire, info, 'idle')
+    return wire
   }
   // An unreadable list judges nothing, so the loop's next event asks again.
   if (listed !== undefined) model.unlisted.set(agentId, MAIN)
@@ -496,9 +545,9 @@ async function toolRan($: EngineInterface, agentId: string, e: Frozen<ToolCallIn
   }
 }
 
-function spawned(agentId: string, parentId: string): void {
+function spawned(clientId: string, agentId: string, parentId: string): void {
   // A step that reached the mod before the client's list named the agent counted it for main until now.
-  model.unlisted.delete(agentId)
+  model.unlisted.delete(clientId)
   model.released.delete(agentId)
   const agent = model.agents.get(agentId)
   if (agent === undefined) {
@@ -518,18 +567,22 @@ function restHost(agentId: string): void {
   if (agent !== undefined && !model.turning.has(agentId)) rest(agent)
 }
 
-async function turnEnded($: EngineInterface, agentId: string): Promise<void> {
-  if (model.unlisted.has(agentId)) {
-    restHost(holder(agentId) ?? MAIN)
+async function turnEnded($: EngineInterface, clientId: string): Promise<void> {
+  if (model.unlisted.has(clientId)) {
+    restHost(holder(clientId) ?? MAIN)
     return
   }
   // An unreadable list leaves the turn end to the tick.
   const listed = await agentList($)
   if (listed === undefined) return
-  const info = listed.find((agent) => agent.id === agentId)
+  const rows = rowsByWire(listed)
+  const own = listed.find((agent) => agent.id === clientId)
+  const agentId = own === undefined ? wireOf(clientId) : rowWire(own)
+  if (agentId === undefined) return
+  const info = rows.get(agentId)
   const agent = model.agents.get(agentId)
   if (info === undefined && agent === undefined) {
-    model.unlisted.set(agentId, MAIN)
+    model.unlisted.set(clientId, MAIN)
     restHost(MAIN)
     return
   }
@@ -553,9 +606,9 @@ async function reconcile($: EngineInterface): Promise<void> {
   const rows = await agentList($)
   // An unreadable list judges nothing, so each agent stays as held until a later tick reads the list.
   if (rows === undefined || session !== record) return
-  const listed = new Map(rows.map((agent) => [agent.id, agent]))
+  const listed = rowsByWire(rows)
   // A loop judged unlisted that the list names now is an agent, so its next event is judged again.
-  for (const id of [...model.unlisted.keys()]) if (listed.has(id)) model.unlisted.delete(id)
+  for (const id of [...model.unlisted.keys()]) if (rows.some((agent) => agent.id === id)) model.unlisted.delete(id)
   for (const agent of candidates) {
     if (model.agents.get(agent.id) !== agent) continue
     const info = listed.get(agent.id)
@@ -582,7 +635,7 @@ function restate(agent: AgentRecord): void {
 // is sent again, and an agent only the mod holds is announced with its state.
 function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): void {
   const held = new Map(entries.map((entry) => [entry.agent_id, entry]))
-  const client = listed === undefined ? undefined : new Map(listed.rows.map((agent) => [agent.id, agent]))
+  const client = listed === undefined ? undefined : rowsByWire(listed.rows)
   // A reload holds each agent's set as the earlier load saved it, and no spawn fires again. The list's row is the
   // present source, as at a tick, so the whole sends behind this answer carry it. A record that took the place of
   // one the list was asked for is another run, which the row does not describe.
@@ -590,7 +643,7 @@ function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): voi
     const info = model.agents.get(agent.id) === agent ? client?.get(agent.id) : undefined
     if (info !== undefined) agentListed(agent.id, info)
   }
-  const live: AgentInfo[] = []
+  const live: { id: string; info: AgentInfo }[] = []
   for (const [id, { state, park }] of held) {
     if (state === 'released') continue
     const agent = model.agents.get(id)
@@ -616,7 +669,7 @@ function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): voi
     if (id === MAIN || client === undefined) continue
     const info = client.get(id)
     if (info !== undefined && LIVE.has(info.status)) {
-      live.push(info)
+      live.push({ id, info })
     } else {
       report(id, 'released')
       session?.announced.delete(id)
@@ -624,11 +677,11 @@ function reconcileAck(entries: AnsweredAgent[], listed: Listed | undefined): voi
   }
   // Parents first, so a child the answer lists before its parent still joins the parent's open set.
   while (live.length > 0) {
-    const at = live.findIndex((info) => !live.some((other) => other.id === (info.parentId ?? MAIN)))
-    const [info] = live.splice(at < 0 ? 0 : at, 1)
-    if (info === undefined) break
-    adopt(info, 'busy')
-    report(info.id, 'busy')
+    const at = live.findIndex(({ info }) => !live.some((other) => other.info.id === (info.parentId ?? MAIN)))
+    const [next] = live.splice(at < 0 ? 0 : at, 1)
+    if (next === undefined) break
+    adopt(next.id, next.info, 'busy')
+    report(next.id, 'busy')
   }
   for (const agent of [...model.agents.values()]) {
     if (held.has(agent.id)) continue
@@ -689,13 +742,17 @@ function post($: EngineInterface, config: Settings, body: Body): Promise<HttpRes
 // The tracked work as the host holds it: a reload of the module in the same session reads it back before the
 // registration's answer is reconciled, so the park the router holds is not overwritten with a fresh busy main.
 function snapshotModel(record: SessionRecord): SavedModel {
-  const agents: SavedAgent[] = [...model.agents.values()].map((agent) => ({
-    id: agent.id,
-    ...(agent.parent === undefined ? {} : { parent: agent.parent }),
-    state: agent.state,
-    open: [...agent.open.values()].map((task) => ({ ...task })),
-    lastPresence: agent.lastPresence,
-  }))
+  const agents: SavedAgent[] = [...model.agents.values()].map((agent) => {
+    const clientId = model.addresses.get(agent.id)
+    return {
+      id: agent.id,
+      ...(clientId === undefined ? {} : { clientId }),
+      ...(agent.parent === undefined ? {} : { parent: agent.parent }),
+      state: agent.state,
+      open: [...agent.open.values()].map((task) => ({ ...task })),
+      lastPresence: agent.lastPresence,
+    }
+  })
   return {
     id: record.id,
     agents,
@@ -706,6 +763,8 @@ function snapshotModel(record: SessionRecord): SavedModel {
 }
 
 function restoreModel(saved: SavedModel, sessionRecord: SessionRecord): void {
+  // A restored teammate's events then count for it ahead of the first read of the client's list.
+  for (const agent of saved.agents) if (agent.clientId !== undefined) model.addresses.set(agent.id, agent.clientId)
   model.agents = new Map(saved.agents.map((agent) => {
     const record = freshRecord(agent.id, agent.state, agent.parent)
     record.open = new Map(agent.open.map((task) => [task.id, { ...task }]))
@@ -1514,7 +1573,7 @@ export function installReporting(on: On, refused: RefusalHandler, facts: FactOpt
       const agentId = await attribute($, e.agentId)
       if (agentId !== undefined) {
         // Only a loop's own step starts its agent's turn: a fork working for main neither starts nor ends main's.
-        if (agentId === (e.agentId ?? MAIN)) model.turning.add(agentId)
+        if (agentId === (e.agentId === undefined ? MAIN : wireOf(e.agentId))) model.turning.add(agentId)
         busy(agentId)
       }
       void pump($)
@@ -1555,12 +1614,16 @@ export function installReporting(on: On, refused: RefusalHandler, facts: FactOpt
       if (e.workflow !== undefined) {
         model.unlisted.set(agentId, parent)
       } else {
-        spawned(agentId, parent)
+        const address = field(r, 'teammateId')
+        // A respawn under the name keeps the address, so the new run's client id takes it from the earlier run's.
+        if (typeof address === 'string') model.addresses.set(address, agentId)
+        const wire = wireOf(agentId)
+        spawned(agentId, wire, parent)
         if (record !== undefined) {
-          agentSpawned(agentId, e)
+          agentSpawned(wire, e)
           // An agent whose start is on its way gets its set at the start's acknowledgment. One whose own step reached
           // the mod ahead of this answer, and which the router acknowledged since, gets the call's set as a change.
-          sendAgentFacts(record, agentId, false)
+          sendAgentFacts(record, wire, false)
         }
       }
       void pump($)

@@ -9,6 +9,8 @@ export type SavedTask = { id: string; kind: 'command' | 'subagent'; deadline?: n
 export type AgentFactSet = { agent_type?: string; description?: string; name?: string }
 export type SavedAgent = {
   id: string
+  // A teammate's `id` is its address, and its events name it by this client id alone.
+  clientId?: string
   parent?: string
   state: 'busy' | 'idle' | 'parked' | 'released'
   open: SavedTask[]

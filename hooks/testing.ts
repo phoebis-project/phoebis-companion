@@ -137,6 +137,7 @@ export type FakeRouter = {
     description?: string
     name?: string
     parentId?: string
+    teammateId?: string
   }[]) => void
   /** Moves the session's place for the reads that follow. */
   setPlace: (place: FakePlace) => void
@@ -149,8 +150,11 @@ export type FakeRouter = {
    * function that answers a promise holds the call until it settles, as a tool that runs for a while does.
    */
   answerTool: (fn: (e: { tool: string }) => unknown) => void
-  /** Scripts the next `agent.spawn`'s answer the same way, with the id the client gives the agent. */
-  answerSpawn: (fn: () => { agentId: string } | Promise<{ agentId: string }>) => void
+  /**
+   * Scripts the next `agent.spawn`'s answer the same way, with the id the client gives the agent and, for a teammate,
+   * its address.
+   */
+  answerSpawn: (fn: () => SpawnAnswer | Promise<SpawnAnswer>) => void
   /**
    * Scripts the next `$.process.run` whose vector starts with `git`, and several calls answer the next ones in turn.
    * A function that answers a promise holds the call open until it settles. Without a script git answers the branch
@@ -235,7 +239,9 @@ export type FakeRouter = {
   holdWrite: (key: 'facts' | 'model') => () => void
 }
 
-type Replayed = { tool?: unknown; spawn?: { model?: string; agentId?: string } }
+type SpawnAnswer = { agentId: string; teammateId?: string }
+
+type Replayed = { tool?: unknown; spawn?: { model?: string; agentId?: string; teammateId?: string } }
 
 const replayed = new WeakMap<FakeRouter, Replayed>()
 
@@ -355,11 +361,11 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
   let id = options.id ?? 'session-a'
   // The fields the fake builds for an agent, which cover what a hook reads. The client's AgentInfo gains required
   // fields between releases, so the list is cast once, where the fake answers agent.list.
-  let agents: Pick<AgentInfo, 'description' | 'id' | 'name' | 'parentId' | 'status' | 'type'>[] = []
+  let agents: Pick<AgentInfo, 'description' | 'id' | 'name' | 'parentId' | 'status' | 'teammateId' | 'type'>[] = []
   const answers: Answer[] = []
   const getAnswers: GetAnswer[] = []
   const tools: ((e: { tool: string }) => unknown)[] = []
-  const spawns: (() => { agentId: string } | Promise<{ agentId: string }>)[] = []
+  const spawns: (() => SpawnAnswer | Promise<SpawnAnswer>)[] = []
   const gits: (() => GitAnswer | Promise<GitAnswer>)[] = []
   let place: FakePlace = options.place ?? {}
   // Each place the session stood in, by its directory, so a git call that names one answers for it after a move.
@@ -430,6 +436,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
         description: agent.description ?? '',
         ...(agent.name === undefined ? {} : { name: agent.name }),
         ...(agent.parentId === undefined ? {} : { parentId: agent.parentId }),
+        ...(agent.teammateId === undefined ? {} : { teammateId: agent.teammateId }),
       }))
     },
     setPlace: (next) => {
@@ -820,6 +827,7 @@ export function fakeRouter(on: On, clock: MockClock, options: FakeOptions = {}):
     return {
       model: recorded?.model ?? e.parentModel ?? 'claude-haiku-4-5',
       agentId: recorded?.agentId ?? `agent-${spawned}`,
+      ...(recorded?.teammateId === undefined ? {} : { teammateId: recorded.teammateId }),
     }
   })
   return router

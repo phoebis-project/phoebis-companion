@@ -36,9 +36,9 @@ const DESCRIPTION = [
   '(allowance left, with the account inside its wind-down) or spent (the share at 1 or more, so nothing is left ' +
   'until horizon_at). `runway_minutes`, the whole minutes until the share reaches `ceiling` at the current burn: 0 ' +
   'at or above it, and null means unbounded.',
-  'Each pin of this session: `agent` (main or a subagent id), `model`, `account` (a pseudonym), `placed_at`, ' +
-  '`last_used_at`, `warm` and `warm_until` for its cache entry, `runway_minutes` on the window that binds it ' +
-  '(`binding_window`) and `slow_down`.',
+  'Each pin of this session: `agent` (main, a subagent id or a teammate\'s address), `model`, `account` (a ' +
+  'pseudonym), `placed_at`, `last_used_at`, `warm` and `warm_until` for its cache entry, `runway_minutes` on the ' +
+  'window that binds it (`binding_window`) and `slow_down`.',
   'Read it for pace alone. A window whose fit is fits and whose runway is long or null has room for a long run or a ' +
   'fan-out. A short runway on the account a pin names means the pool is close to its ceiling on that window at the ' +
   'current burn: finish the work before then, wait for the reset horizon_at names, or spread the work out. The ' +

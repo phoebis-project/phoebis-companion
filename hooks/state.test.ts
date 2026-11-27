@@ -1762,6 +1762,142 @@ test('the agent id the mod reports is the one string the spawn, the steps, the c
     expect(states(router).at(-1)).toBe('state main idle')
   })
 
+// A teammate of an agent team as Claude Code 2.1.332 names it: the client id that its loop's events and its list row
+// carry, and the address `<name>@<team>` that its requests carry. A respawn under the name keeps the address.
+const TEAMMATE = 'atwin-fd279390099a2a0d'
+const RESPAWNED = 'atwin-5b0e3c19a7d24f86'
+const ADDRESS = 'twin@session-22222222'
+const AGENT_REPORTS = { options: { ...CONFIGURED.options, report_agents: true } }
+
+test('each report of a spawned teammate names its address, which its requests carry', AGENT_REPORTS,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    await submit($, clock, 'composer')
+    router.answerSpawn(() => ({ agentId: TEAMMATE, teammateId: ADDRESS }))
+    await $.agent.spawn({
+      prompt: '',
+      description: 'Review the retry loop',
+      subagentType: 'general-purpose',
+      name: 'twin',
+      isTeammate: true,
+    } as Parameters<Engine['agent']['spawn']>[0])
+    await clock.settle()
+    await step($, clock, TEAMMATE)
+    await call($, clock, router, { ...bash('bg-1')[0], agentId: TEAMMATE }, bash('bg-1')[1])
+    router.setAgents([{
+      id: TEAMMATE, teammateId: ADDRESS, status: 'idle', name: 'twin', description: 'Review the retry loop',
+    }])
+    await complete($, clock, TEAMMATE)
+    expect(told(router)).toEqual([
+      'session_start',
+      'activity main prompt',
+      `agent_start ${ADDRESS}`,
+      'agent_facts',
+      `state ${ADDRESS} parked background ${T0 + 1800000}`,
+    ])
+    expect(router.requests.find((body) => body.event === 'agent_facts')).toMatchObject({ agent_id: ADDRESS })
+  })
+
+test('the tracked work keeps a teammate\'s client id beside its address for a reload', CONFIGURED, async ($, on) => {
+  const { clock, router } = host(on)
+  await start($, clock)
+  await submit($, clock, 'composer')
+  router.answerSpawn(() => ({ agentId: TEAMMATE, teammateId: ADDRESS }))
+  await spawn($, clock)
+  expect(router.values.get('model')).toEqual({
+    id: 'session-a',
+    agents: [
+      { id: 'main', state: 'busy', open: [{ id: ADDRESS, kind: 'subagent' }], lastPresence: 0 },
+      { id: ADDRESS, clientId: TEAMMATE, parent: 'main', state: 'busy', open: [], lastPresence: 0 },
+    ],
+    crons: [],
+    released: [],
+    routerReleased: [],
+  })
+})
+
+test('a reload counts an event of a restored teammate\'s client id for its record ahead of any read of the list',
+  CONFIGURED, async ($, on) => {
+    const saved = {
+      id: 'session-a',
+      agents: [
+        { id: 'main', state: 'parked', open: [{ id: ADDRESS, kind: 'subagent' }], lastPresence: 0 },
+        {
+          id: ADDRESS,
+          clientId: TEAMMATE,
+          parent: 'main',
+          state: 'parked',
+          open: [{ id: 'bg-1', kind: 'command', deadline: T0 + 60000 }],
+          lastPresence: 0,
+        },
+      ],
+      crons: [],
+      released: [],
+      routerReleased: [],
+    }
+    const { clock, router } = reloaded(on, saved)
+    router.answer((_body, ack) => ok({
+      ...ack,
+      agents: [
+        { agent_id: 'main', state: 'parked', park_kind: 'background', request_generation: 1 },
+        { agent_id: ADDRESS, state: 'parked', park_kind: 'background', deadline: T0 + 60000, request_generation: 1 },
+      ],
+    }))
+    // The host refuses the registration's read of the client's list and the next one, so only the saved client id
+    // ties the teammate's event to its record.
+    router.denyList('another hook refuses the read')
+    router.denyList('another hook refuses the read')
+    await start($, clock)
+    await step($, clock, TEAMMATE)
+    expect(told(router)).toEqual(['session_start', `state ${ADDRESS} busy`])
+  })
+
+test('a registration adopts a teammate that the router holds under its address while the client lists it live',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    router.setAgents([{ id: TEAMMATE, teammateId: ADDRESS, status: 'running' }])
+    router.answer((_body, ack) => ok({
+      ...ack,
+      agents: [
+        { agent_id: 'main', state: 'busy', request_generation: 1 },
+        { agent_id: ADDRESS, state: 'busy', request_generation: 1 },
+      ],
+    }))
+    await start($, clock)
+    expect(told(router)).toEqual(['session_start', `state ${ADDRESS} busy`])
+  })
+
+describe('the heartbeat keeps a respawned teammate while the list still shows the ended run beside it', () => {
+  const ended = { id: TEAMMATE, teammateId: ADDRESS, status: 'completed' }
+  const running = { id: RESPAWNED, teammateId: ADDRESS, status: 'running' }
+  const orders = { 'ended row first': [ended, running], 'running row first': [running, ended] }
+  for (const [order, rows] of Object.entries(orders)) {
+    test(order, CONFIGURED, async ($, on) => {
+      const { clock, router } = host(on)
+      await start($, clock)
+      await submit($, clock, 'composer')
+      router.answerSpawn(() => ({ agentId: TEAMMATE, teammateId: ADDRESS }))
+      await spawn($, clock)
+      router.setAgents([ended])
+      await complete($, clock, TEAMMATE)
+      router.answerSpawn(() => ({ agentId: RESPAWNED, teammateId: ADDRESS }))
+      await spawn($, clock)
+      await complete($, clock)
+      router.setAgents(rows)
+      await clock.advance(25000)
+      expect(told(router)).toEqual([
+        'session_start',
+        'activity main prompt',
+        `agent_start ${ADDRESS}`,
+        `state ${ADDRESS} released`,
+        `agent_start ${ADDRESS}`,
+        'state main parked background',
+      ])
+    })
+  }
+})
+
 test('an unknown_agent answer takes the agent out of the announced set so its next report announces it again',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)

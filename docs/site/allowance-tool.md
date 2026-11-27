@@ -39,10 +39,10 @@ would reach the ceiling before the window resets and before an end of the accoun
 `null` where nothing bounds the runway, because nothing burns or because the window resets or the subscription ends
 first.
 
-`pins` holds one entry per pin of this session under the key: the `agent` (`main` or the subagent's id), the `model`,
-the `account` by its pseudonym, when the pin was placed and last used, `warm` and `warm_until` for its cache entry, its
-`runway_minutes` on the window that binds it (`binding_window`), read by the same rule as a window's with the account's
-subscription end counted only while it lies ahead, and its `slow_down` figures.
+`pins` holds one entry per pin of this session under the key: the `agent` (`main`, a subagent's id or a teammate's
+address), the `model`, the `account` by its pseudonym, when the pin was placed and last used, `warm` and `warm_until`
+for its cache entry, its `runway_minutes` on the window that binds it (`binding_window`), read by the same rule as a
+window's with the account's subscription end counted only while it lies ahead, and its `slow_down` figures.
 
 A model reads the answer for pace alone. A window's `fit` says whether new work has room on it, and `fits` leaves room
 for a long run or a fan-out. A `null` runway means that nothing burns, or that the window resets or the account's

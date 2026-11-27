@@ -1,10 +1,11 @@
 # What the mod reports
 
-The mod reports on main, the session's own agent, and on each subagent the client lists. Each agent has an open set: the
-background commands and the subagents it started that have not ended yet. The session's crons and wakeups belong to
-main. Every report is one request to the router's events route, and the route, the eight events with their fields, the
-acknowledgment, the refusal codes and how the mod queues, sends and retries are on [The
-relay](../router/relay.md#the-companion-protocol).
+The mod reports on main, the session's own agent, and on each subagent and each teammate of an agent team that the
+client lists. It reports a subagent under the id the client lists and a teammate under its address `<name>@<team>`,
+which is the id the teammate's requests carry. Each agent has an open set: the background commands and the subagents it
+started that have not ended yet. The session's crons and wakeups belong to main. Every report is one request to the
+router's events route, and the route, the eight events with their fields, the acknowledgment, the refusal codes and how
+the mod queues, sends and retries are on [The relay](../router/relay.md#the-companion-protocol).
 
 | Mod event | Fact | Report |
 | --- | --- | --- |
@@ -87,7 +88,7 @@ next whole millisecond.
 
 A subagent parks the same way on its own open set when its turn ends. A subagent whose turn ends with nothing open
 reports `released`, since its work went back to its parent, and its next turn under the same id starts it again with
-`agent_start`.
+`agent_start`. For a teammate, the id that stays from turn to turn is its address.
 
 An entry leaves its open set on the first of these:
 
