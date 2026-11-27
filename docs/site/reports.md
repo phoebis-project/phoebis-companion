@@ -163,8 +163,6 @@ never start an agent, and the set goes out again behind the agent's next acknowl
 acknowledged survives a reload, as the session's does. A description or a name is cut at 256 bytes on a whole character,
 and a type over 256 bytes is left out. A workflow's agents and main report none.
 
-<a id="the-owner-header"></a>
-
 ## The instance header
 
 At session start the mod fences the process: it mints one v4 uuid, the instance id, and writes one
