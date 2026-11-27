@@ -134,6 +134,10 @@ type Model = {
   // Each teammate's address with the client id that holds it. A teammate's events and list row name it by the client
   // id, while its requests carry the address, so the router files it under the address and the model keys it there too.
   addresses: Map<string, string>
+  // The client ids that a spawn answer gave an address and that no read of the client's list has named since. A list
+  // the client answered before the spawn holds no row of the new run, and that is no sign the run left, so such a list
+  // leaves the address with it.
+  spawnedHolders: Set<string>
 }
 
 // The client's list as a registration read it, with the subagents the mod held when it asked. The answer arrives later,
@@ -263,6 +267,7 @@ function freshModel(): Model {
     current: new Set(),
     released: new Set(),
     addresses: new Map(),
+    spawnedHolders: new Set(),
   }
 }
 
@@ -373,19 +378,35 @@ function wireOf(agentId: string): string {
   return agentId
 }
 
+// A respawn under a name is a new run at the same address, so the earlier run's record ends first: the router reads
+// its release ahead of the new run's start, and the new run holds nothing that the earlier one left open.
+function giveAddress(address: string, clientId: string): void {
+  const holder = model.addresses.get(address)
+  if (holder !== undefined && holder !== clientId) {
+    model.spawnedHolders.delete(holder)
+    if (model.agents.has(address)) release(address)
+  }
+  model.addresses.set(address, clientId)
+}
+
 // A read of the client's list hands each teammate's address to a row. A row takes an address that another client id
 // holds only while the row is live and the holder's row ended or left the list, since a respawn under the name keeps
-// the address and an ended teammate's row can stay listed for seconds beside the new run's.
+// the address and an ended teammate's row can stay listed for seconds beside the new run's. A holder that only its
+// spawn answer has named yet has not left a list that lacks its row.
 function noteTeammates(rows: AgentInfo[]): void {
   const byId = new Map(rows.map((agent) => [agent.id, agent]))
+  for (const id of byId.keys()) model.spawnedHolders.delete(id)
   for (const row of rows) {
     const address = row.teammateId
     if (address === undefined) continue
     const holder = model.addresses.get(address)
-    const holderRow = holder === undefined ? undefined : byId.get(holder)
-    const takes = holder === undefined ||
-      (LIVE.has(row.status) && (holderRow === undefined || ENDED.has(holderRow.status)))
-    if (takes) model.addresses.set(address, row.id)
+    if (holder === undefined) {
+      giveAddress(address, row.id)
+      continue
+    }
+    const holderRow = byId.get(holder)
+    const left = holderRow === undefined ? !model.spawnedHolders.has(holder) : ENDED.has(holderRow.status)
+    if (LIVE.has(row.status) && left) giveAddress(address, row.id)
   }
 }
 
@@ -445,7 +466,8 @@ async function attribute($: EngineInterface, agentId: string | undefined): Promi
   const info = listed?.find((agent) => agent.id === agentId)
   if (info !== undefined) {
     const wire = rowWire(info)
-    // The row's address can belong to a record the mod already holds, and that record keeps its open set.
+    // Another event of this loop, or its spawn's answer, can have made the record while this read was out, and that
+    // record keeps its open set.
     if (wire !== undefined && !model.agents.has(wire)) adopt(wire, info, 'idle')
     return wire
   }
@@ -1615,8 +1637,10 @@ export function installReporting(on: On, refused: RefusalHandler, facts: FactOpt
         model.unlisted.set(agentId, parent)
       } else {
         const address = field(r, 'teammateId')
-        // A respawn under the name keeps the address, so the new run's client id takes it from the earlier run's.
-        if (typeof address === 'string') model.addresses.set(address, agentId)
+        if (typeof address === 'string') {
+          giveAddress(address, agentId)
+          model.spawnedHolders.add(agentId)
+        }
         const wire = wireOf(agentId)
         spawned(agentId, wire, parent)
         if (record !== undefined) {

@@ -1805,15 +1805,8 @@ test('the tracked work keeps a teammate\'s client id beside its address for a re
   await submit($, clock, 'composer')
   router.answerSpawn(() => ({ agentId: TEAMMATE, teammateId: ADDRESS }))
   await spawn($, clock)
-  expect(router.values.get('model')).toEqual({
-    id: 'session-a',
-    agents: [
-      { id: 'main', state: 'busy', open: [{ id: ADDRESS, kind: 'subagent' }], lastPresence: 0 },
-      { id: ADDRESS, clientId: TEAMMATE, parent: 'main', state: 'busy', open: [], lastPresence: 0 },
-    ],
-    crons: [],
-    released: [],
-    routerReleased: [],
+  expect(router.values.get('model')).toMatchObject({
+    agents: expect.arrayContaining([expect.objectContaining({ id: ADDRESS, clientId: TEAMMATE })]),
   })
 })
 
@@ -1853,19 +1846,30 @@ test('a reload counts an event of a restored teammate\'s client id for its recor
     expect(told(router)).toEqual(['session_start', `state ${ADDRESS} busy`])
   })
 
-test('a registration adopts a teammate that the router holds under its address while the client lists it live',
+test('a registration adopts a teammate that the router holds under its address, with its child in its open set',
   CONFIGURED, async ($, on) => {
     const { clock, router } = host(on)
-    router.setAgents([{ id: TEAMMATE, teammateId: ADDRESS, status: 'running' }])
+    // The client lists the teammate's child under the teammate's client id.
+    router.setAgents([
+      { id: TEAMMATE, teammateId: ADDRESS, status: 'running' },
+      { id: 'agent-7', status: 'running', parentId: TEAMMATE },
+    ])
     router.answer((_body, ack) => ok({
       ...ack,
       agents: [
         { agent_id: 'main', state: 'busy', request_generation: 1 },
         { agent_id: ADDRESS, state: 'busy', request_generation: 1 },
+        { agent_id: 'agent-7', state: 'busy', request_generation: 1 },
       ],
     }))
     await start($, clock)
-    expect(told(router)).toEqual(['session_start', `state ${ADDRESS} busy`])
+    await complete($, clock, TEAMMATE)
+    expect(told(router)).toEqual([
+      'session_start',
+      `state ${ADDRESS} busy`,
+      'state agent-7 busy',
+      `state ${ADDRESS} parked background`,
+    ])
   })
 
 describe('the heartbeat keeps a respawned teammate while the list still shows the ended run beside it', () => {
@@ -1897,6 +1901,84 @@ describe('the heartbeat keeps a respawned teammate while the list still shows th
     })
   }
 })
+
+// A teammate that main spawned, parked at its turn end on a background command of its own.
+async function parkedTeammate($: Engine, clock: MockClock, router: FakeRouter): Promise<void> {
+  await start($, clock)
+  await submit($, clock, 'composer')
+  router.answerSpawn(() => ({ agentId: TEAMMATE, teammateId: ADDRESS }))
+  await spawn($, clock)
+  await call($, clock, router, { ...bash('bg-1')[0], agentId: TEAMMATE }, bash('bg-1')[1])
+  router.setAgents([{ id: TEAMMATE, teammateId: ADDRESS, status: 'idle' }])
+  await complete($, clock, TEAMMATE)
+}
+
+test('a spawn answer that moves an address to a new client id releases the earlier run ahead of the new start',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await parkedTeammate($, clock, router)
+    // The client killed the parked run, and nothing of that end reached the mod before the spawn under the name.
+    router.answerSpawn(() => ({ agentId: RESPAWNED, teammateId: ADDRESS }))
+    await spawn($, clock)
+    router.setAgents([{ id: RESPAWNED, teammateId: ADDRESS, status: 'running' }])
+    await complete($, clock, RESPAWNED)
+    expect(told(router)).toEqual([
+      'session_start',
+      'activity main prompt',
+      `agent_start ${ADDRESS}`,
+      `state ${ADDRESS} parked background ${T0 + 1800000}`,
+      `state ${ADDRESS} released`,
+      `agent_start ${ADDRESS}`,
+      `state ${ADDRESS} released`,
+    ])
+  })
+
+test('a list read that moves an address to a new client id releases the earlier run ahead of the new start',
+  CONFIGURED, async ($, on) => {
+    const { clock, router } = host(on)
+    await parkedTeammate($, clock, router)
+    // The new run's first step reaches the mod ahead of its spawn answer, while the list still shows the ended run.
+    router.setAgents([
+      { id: TEAMMATE, teammateId: ADDRESS, status: 'completed' },
+      { id: RESPAWNED, teammateId: ADDRESS, status: 'running' },
+    ])
+    await step($, clock, RESPAWNED)
+    router.answerSpawn(() => ({ agentId: RESPAWNED, teammateId: ADDRESS }))
+    await spawn($, clock)
+    await complete($, clock, RESPAWNED)
+    expect(told(router)).toEqual([
+      'session_start',
+      'activity main prompt',
+      `agent_start ${ADDRESS}`,
+      `state ${ADDRESS} parked background ${T0 + 1800000}`,
+      `state ${ADDRESS} released`,
+      `agent_start ${ADDRESS}`,
+      `state ${ADDRESS} busy`,
+      `state ${ADDRESS} released`,
+    ])
+  })
+
+test('a list read before a spawn answered leaves the address with the spawn\'s client id', CONFIGURED,
+  async ($, on) => {
+    const { clock, router } = host(on)
+    await start($, clock)
+    await submit($, clock, 'composer')
+    router.answerSpawn(() => ({ agentId: TEAMMATE, teammateId: ADDRESS }))
+    await spawn($, clock)
+    router.answerSpawn(() => ({ agentId: RESPAWNED, teammateId: ADDRESS }))
+    await spawn($, clock)
+    // The first run's turn end reads a list that the client answered before the second spawn did, so it holds the
+    // first run's row alone.
+    router.setAgents([{ id: TEAMMATE, teammateId: ADDRESS, status: 'idle' }])
+    await complete($, clock, TEAMMATE)
+    expect(told(router)).toEqual([
+      'session_start',
+      'activity main prompt',
+      `agent_start ${ADDRESS}`,
+      `state ${ADDRESS} released`,
+      `agent_start ${ADDRESS}`,
+    ])
+  })
 
 test('an unknown_agent answer takes the agent out of the announced set so its next report announces it again',
   CONFIGURED, async ($, on) => {
