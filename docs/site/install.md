@@ -10,8 +10,9 @@ Inside Claude Code:
 ```
 
 The install line resolves once the marketplace is added. From a shell, `claude plugin marketplace add` and
-`claude plugin install` take the same arguments. The [changelog](changelog.md) says what each release holds. For
-development, `claude --plugin-dir <checkout>` loads a checkout of
+`claude plugin install` take the same arguments. The catalog names the companion's newest release, so an install gets
+that release, and Claude Code's plugin update moves an installed copy to it. The [changelog](changelog.md) says what
+each release holds. For development, `claude --plugin-dir <checkout>` loads a checkout of
 [the companion repository](https://github.com/phoebis-project/phoebis-companion) for one session.
 
 The mod needs Claude Code 2.1.299 or later. An older client runs the session without the mod: its engine refuses the

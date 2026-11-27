@@ -1,0 +1,155 @@
+name: Release
+on:
+  # A pull request that changes a file the guard reads runs the guard alone, so a manifest or a changelog that a
+  # release would be refused for is caught before a release is created.
+  pull_request:
+    paths:
+      - .claude-plugin/plugin.json
+      - .github/workflows/release.yml
+      - docs/site/changelog.md
+  # Published alone, so a prerelease that is later marked as a full release starts no run and the catalog stays.
+  release:
+    types: [published]
+  # The dry run: the guard checks the manifest's version, and the catalog job prints the entry that a release of that
+  # version would write and writes nothing.
+  workflow_dispatch:
+# Read-only, and no job names a wider scope: the catalog is written with the token of a GitHub App, since a job's own
+# token writes its own repository alone.
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    outputs:
+      full: ${{ steps.decide.outputs.full }}
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(jq -r '.version // empty' .claude-plugin/plugin.json)
+          [ -n "$version" ] || { echo ".claude-plugin/plugin.json states no version"; exit 1; }
+          # The version goes into the outputs and into the heading's text below, so on each event it is one line in the
+          # release form. The message prints no part of the value, since a value of two lines can hold a line that the
+          # runner reads as a command.
+          form='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
+          [[ "$version" =~ $form ]] \
+            || { echo ".claude-plugin/plugin.json states a version that is not X.Y.Z or X.Y.Z-suffix"; exit 1; }
+          # The heading is compared as fixed text and never as a pattern: a line matches where it is the heading or
+          # goes on behind it with a space.
+          section() {
+            awk -v heading="## $1" '$0 == heading || index($0, heading " ") == 1 { found = 1 } END { exit !found }' \
+              docs/site/changelog.md
+          }
+          full=false
+          if [ "$EVENT" = release ]; then
+            printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+              || { echo "release tag '$TAG' is not X.Y.Z or X.Y.Z-suffix"; exit 1; }
+            # Claude Code takes a plugin's version from the manifest, so under a tag that differs an installed user
+            # would stay on the earlier copy.
+            [ "$TAG" = "$version" ] || {
+              echo "release tag '$TAG' differs from the version '$version' in .claude-plugin/plugin.json"
+              exit 1
+            }
+            section "$TAG" \
+              || { echo "docs/site/changelog.md has no '## $TAG' section for this release"; exit 1; }
+            # A prerelease is a tag with a suffix or a release marked as one. It leaves the catalog where it is, so
+            # the catalog keeps naming the newest full release.
+            case "$TAG" in *-*) ;; *) [ "$PRERELEASE" = true ] || full=true ;; esac
+          else
+            section "$version" \
+              || { echo "docs/site/changelog.md has no '## $version' section for the manifest's version"; exit 1; }
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+  catalog:
+    # A full release writes the catalog, and a dispatch reads it as the dry run. The condition names both events, so no
+    # value of the guard's output selects the job on a pull request, and a fork's pull request, which gets no secret,
+    # never reaches the token step.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'release' && needs.guard.outputs.full == 'true')
+    needs: guard
+    # The App's client id is a variable and its key a secret of this environment, so no other job of the repository
+    # reads either.
+    environment: catalog
+    runs-on: ubuntu-24.04
+    env:
+      # A step's condition cannot read a secret, so the job states once for each half of the credential whether it is
+      # set.
+      CLIENT_ID_SET: ${{ vars.CATALOG_APP_CLIENT_ID != '' }}
+      PRIVATE_KEY_SET: ${{ secrets.CATALOG_APP_PRIVATE_KEY != '' }}
+    steps:
+      # The token step would fail on a missing half with the action's own error. The line says for each half whether it
+      # is set and prints no value.
+      - if: env.CLIENT_ID_SET != 'true' || env.PRIVATE_KEY_SET != 'true'
+        run: |
+          echo "::error::No token for the catalog. Variable CATALOG_APP_CLIENT_ID set: $CLIENT_ID_SET." \
+            "Secret CATALOG_APP_PRIVATE_KEY set: $PRIVATE_KEY_SET."
+          exit 1
+      # The token reaches the catalog's repository alone, and its contents alone.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.CATALOG_APP_CLIENT_ID }}
+          owner: phoebis-project
+          permission-contents: write
+          private-key: ${{ secrets.CATALOG_APP_PRIVATE_KEY }}
+          repositories: phoebis-marketplace
+      # The blob id goes to the write, which GitHub then refuses where the file changed behind this read. The read and
+      # the write name main, so neither follows another default branch of the catalog.
+      - id: read
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          gh api 'repos/phoebis-project/phoebis-marketplace/contents/.claude-plugin/marketplace.json?ref=main' \
+            > answer.json
+          jq -r .content answer.json | base64 --decode > old.json
+          echo "blob=$(jq -r .sha answer.json)" >> "$GITHUB_OUTPUT"
+      # The decision makes no network call, so the block runs as it stands against a sample of the catalog's file.
+      - id: entry
+        env:
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+          TAG: ${{ needs.guard.outputs.version }}
+        run: |
+          entry='.plugins[] | select(.name == "phoebis-companion")'
+          jq -e "[$entry] | length == 1" old.json > /dev/null \
+            || { echo "the catalog has no entry 'phoebis-companion'"; exit 1; }
+          ref=$(jq -r "$entry | .source.ref? // empty" old.json)
+          sha=$(jq -r "$entry | .source.sha? // empty" old.json)
+          if [ "$ref" = "$TAG" ] && [ "$sha" = "$SHA" ]; then
+            echo "the catalog names '$TAG' already"
+            exit 0
+          fi
+          # A release cut from an earlier line would take each user back, so the catalog moves forward alone. A dry
+          # run prints the line and stays green, since a main whose version was not raised yet is no fault.
+          if [ -n "$ref" ] && [ "$(printf '%s\n%s\n' "$ref" "$TAG" | sort -V | tail -n 1)" = "$ref" ]; then
+            echo "the catalog names '$ref', which is not lower than '$TAG', so the catalog stays"
+            [ "$EVENT" = release ] && exit 1
+            exit 0
+          fi
+          # The https address clones with no GitHub SSH key, and sha holds an install on the tagged commit.
+          jq --arg ref "$TAG" --arg sha "$SHA" \
+            --arg url https://github.com/phoebis-project/phoebis-companion.git \
+            "($entry | .source) = {source: \"url\", url: \$url, ref: \$ref, sha: \$sha}" old.json > new.json
+          jq -c "$entry | .source" new.json
+          [ "$EVENT" = release ] && echo "write=true" >> "$GITHUB_OUTPUT"
+          exit 0
+      # A dispatch ends at the step above, so the dry run writes nothing.
+      - if: steps.entry.outputs.write == 'true'
+        env:
+          BLOB: ${{ steps.read.outputs.blob }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TAG: ${{ needs.guard.outputs.version }}
+        run: |
+          gh api -X PUT repos/phoebis-project/phoebis-marketplace/contents/.claude-plugin/marketplace.json \
+            -f branch=main -f message="Name phoebis-companion $TAG" -f content="$(base64 -w 0 new.json)" \
+            -f sha="$BLOB" > /dev/null
